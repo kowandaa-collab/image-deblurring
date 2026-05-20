@@ -9,6 +9,6 @@ Deblurred PNGs (1280×720) and per-image metrics on the prepared GoPro test spli
 | NAFNet/GoPro + TTA | `NAFNet/GoPro_tta/GoPro/` | 25.6602 | 0.8490 | 0.2788 |
 | NAFNet/GoPro_full | `NAFNet/GoPro_full/GoPro/` | (metrics not computed) | | |
 
-Metrics CSVs: `*/metrics_gopro*.csv` (columns: `file`, `psnr`, `ssim`, `lpips`).
+Metrics CSVs (in repo): `results/MIMO_UNet/GoPro/metrics_gopro.csv`, `results/NAFNet/GoPro/metrics_gopro.csv`, `results/NAFNet/GoPro_tta/metrics_gopro_tta.csv` (columns: `file`, `psnr`, `ssim`, `lpips`).
 
-PNG outputs are stored with **Git LFS** (`results/**/*.png`).
+Deblurred PNGs (~5 GB) are kept locally under `results/**/GoPro/` and are not in this repository.

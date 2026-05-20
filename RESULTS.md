@@ -11,4 +11,17 @@ Deblurred PNGs (1280×720) and per-image metrics on the prepared GoPro test spli
 
 Metrics CSVs (in repo): `results/MIMO_UNet/GoPro/metrics_gopro.csv`, `results/NAFNet/GoPro/metrics_gopro.csv`, `results/NAFNet/GoPro_tta/metrics_gopro_tta.csv` (columns: `file`, `psnr`, `ssim`, `lpips`).
 
-Deblurred PNGs (~5 GB) are kept locally under `results/**/GoPro/` and are not in this repository.
+Deblurred PNGs (~5 GB total) are **not** in git. Download from [GitHub Releases](https://github.com/kowandaa-collab/image-deblurring/releases/tag/gopro-results-v1) (after upload), or build zips locally:
+
+```powershell
+.\create_results_zips.ps1
+gh auth login
+.\upload_results_release.ps1
+```
+
+| Release asset | Contents |
+|---------------|----------|
+| `MIMO_UNet_GoPro.zip` | `results/MIMO_UNet/GoPro/GoPro/` (1111 PNGs) |
+| `NAFNet_GoPro.zip` | `results/NAFNet/GoPro/GoPro/` |
+| `NAFNet_GoPro_tta.zip` | `results/NAFNet/GoPro_tta/GoPro/` |
+| `NAFNet_GoPro_full.zip` | `results/NAFNet/GoPro_full/GoPro/` |

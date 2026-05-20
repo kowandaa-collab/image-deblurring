@@ -9,5 +9,7 @@ weights/
 results/**
 !results/**/
 !results/**/metrics*.csv
+results.zip
+release_assets/
 dataset/
 # *.png

@@ -15,11 +15,17 @@ if (-not (Test-Path $assets)) {
 $zips = Get-ChildItem $assets -Filter "*.zip" | Sort-Object Name
 if ($zips.Count -eq 0) { Write-Error "No zip files in release_assets/" }
 
-gh release view $Tag -R $Repo 2>$null
-if ($LASTEXITCODE -ne 0) {
+$releaseExists = $false
+try {
+    gh release view $Tag -R $Repo 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { $releaseExists = $true }
+} catch { $releaseExists = $false }
+
+if (-not $releaseExists) {
     gh release create $Tag -R $Repo `
         --title "GoPro deblurred images" `
         --notes "1111 PNGs per run (1280x720). Extract into results/<model>/GoPro/GoPro/."
+    if ($LASTEXITCODE -ne 0) { throw "Failed to create release $Tag" }
 }
 
 foreach ($z in $zips) {

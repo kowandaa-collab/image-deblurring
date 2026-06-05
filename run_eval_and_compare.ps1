@@ -19,6 +19,7 @@ param(
   [string]$ModelPath,
   [Parameter(Mandatory = $true)]
   [string]$DmPath,
+  [string]$Model = '',
   [string]$DatasetRoot = "D:/dataset/test",
   [string]$DatasetName = "GoPro",
   [string]$RunName = "NAFNet/GoPro_auto",
@@ -49,15 +50,24 @@ $csvPath = Join-Path $resultDir ("metrics_{0}.csv" -f $DatasetName.ToLower())
 New-Item -ItemType Directory -Force -Path $resultDir | Out-Null
 
 Write-Host "=== 1/3 Prediction ===" -ForegroundColor Cyan
-$predCmd = @(
-  "src/NAFNet/deblur_predict.py",
+$predictScript = "src/NAFNet/deblur_predict.py"
+$predictArgs   = @(
   "--data_path", $DatasetRoot,
   "--dataset", $DatasetName,
   "--dir_path", $resultDir,
-  "--model_name", $ModelName,
   "--model_path", $ModelPath,
   "--dm_path", $DmPath
 )
+if ($ModelName -like "RestormerBlurDM*") {
+  $predictScript = "src/Restormer/deblur_predict.py"
+  $predictArgs += @("--model_name", $ModelName)
+} elseif ($ModelName -like "*MIMOUNet*") {
+  $predictScript = "src/MIMO_UNet/deblur_predict.py"
+  $predictArgs += @("--model", $(if ($Model -ne '') { $Model } else { 'MIMO-UNet' }))
+} else {
+  $predictArgs += @("--model_name", $ModelName)
+}
+$predCmd = @($predictScript) + $predictArgs
 if ($WithTTA) { $predCmd += "--tta" }
 if ($Tile -gt 0) {
   $predCmd += @("--tile", "$Tile", "--overlap", "$Overlap")

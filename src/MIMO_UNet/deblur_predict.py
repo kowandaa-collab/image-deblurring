@@ -32,9 +32,11 @@ def predict(model, model_le, args, device):
     for val_dataset_name in dataset_name:
         dataset_path = os.path.join(args.data_path, val_dataset_name)
 
-        dataset = Test_Loader(data_path=dataset_path,
-                                crop_size=args.crop_size,
-                                ZeroToOne=False)
+        dataset = Test_Loader(
+            data_path=dataset_path,
+            crop_size=args.crop_size,
+            zero_to_one=False,
+        )
         save_dir = os.path.join(args.dir_path, f'{val_dataset_name}')
         os.makedirs(save_dir, exist_ok=True)
         dataset_len = len(dataset)
@@ -44,7 +46,10 @@ def predict(model, model_le, args, device):
         for idx in tq:
             sample = dataset[idx]
             input = sample['blur'].unsqueeze(0).to(device)
-            label = sample['sharp'].unsqueeze(0).to(device)
+            if dataset.has_target:
+                label = sample['sharp'].unsqueeze(0).to(device)
+            else:
+                label = None
 
             b, c, h, w = input.shape
             factor=8
@@ -72,7 +77,7 @@ if __name__ == "__main__":
     parser.add_argument("--dir_path", default='./results/MIMO_UNet/GoPro/', type=str)
     parser.add_argument("--model_path", default='./weights/MIMO_UNet/GoPro/MIMO_UNet_GoPro_stage3.pth', type=str)
     parser.add_argument("--model_dm_path", default='./weights/MIMO_UNet/GoPro/MIMO_UNet_GoPro_stage3.pth', type=str)
-    parser.add_argument("--model", default='MIMOUNetBlurDM', type=str, choices=['MIMO-UNet', 'MIMO-UNetPlus'])
+    parser.add_argument("--model", default='MIMOUNetBlurDM', type=str, choices=['MIMOUNetBlurDM', 'MIMO-UNet', 'MIMO-UNetPlus'])
     parser.add_argument("--dataset", default='GoPro', type=str, choices=['GoPro+HIDE', 'GoPro', 'HIDE', 'Realblur_J', 'RealBlur_R', 'RWBI'])
     parser.add_argument("--crop_size", default=None, type=int)
 

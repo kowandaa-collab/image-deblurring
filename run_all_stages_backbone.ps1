@@ -13,7 +13,7 @@
 #>
 param(
   [Parameter(Mandatory = $false)]
-  [ValidateSet('MIMO_UNet', 'NAFNet', 'Stripformer')]
+  [ValidateSet('MIMO_UNet', 'NAFNet', 'Stripformer', 'Restormer')]
   [string]$Backbone = 'MIMO_UNet',
 
   [string]$DataPath = 'D:/GOPRO_Large',
@@ -31,7 +31,10 @@ param(
   # MIMO stage2 diffusion checkpoint name (default BlurDM in train_stage2.py)
   [string]$MIMO_Stage2DmName = 'BlurDM',
   # NAFNet stage2 saves best_dm_<name>.pth (default BlurDM in NAFNet train_stage2.py)
-  [string]$NAFNet_Stage2DmName = 'BlurDM'
+  [string]$NAFNet_Stage2DmName = 'BlurDM',
+  # Restormer stage1/3 model name and stage2 prior name
+  [string]$RestormerModelName = 'RestormerBlurDM-light',
+  [string]$Restormer_Stage2DmName = 'BlurDM'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -49,6 +52,8 @@ if ([string]::IsNullOrWhiteSpace($OutRoot)) {
   if ($Backbone -eq 'NAFNet') {
     # Project-local experiments (same layout as MIMO: .../NAFNet/GoPro/stage{1,2,3})
     $OutRoot = Join-Path $PSScriptRoot 'experiments\NAFNet\GoPro'
+  } elseif ($Backbone -eq 'Restormer') {
+    $OutRoot = Join-Path $PSScriptRoot 'experiments\Restormer\GoPro'
   } else {
     $OutRoot = "D:/BlurDM_experiments/$Backbone/GoPro"
   }
@@ -182,11 +187,71 @@ function Invoke-NAFNet {
   Assert-LastCommandSucceeded 'NAFNet stage 3'
 }
 
+function Invoke-Restormer {
+  Write-Host '=== Restormer: Stage 1 (backbone + latent encoder) ===' -ForegroundColor Cyan
+  $env:MASTER_PORT = '29631'
+  python src/Restormer/train_stage1.py `
+    --data_path $DataPath `
+    --dir_path $stage1Dir `
+    --model_name $RestormerModelName `
+    --model $RestormerModelName `
+    --num_workers $NumWorkers `
+    --batch_size $BatchSize `
+    --crop_size $CropSize `
+    --end_epoch $EndEpoch `
+    --validation_epoch $ValidationEpoch `
+    --check_point_epoch $CheckpointEpoch `
+    --val_save_epochs $ValSaveEpochs
+  Assert-LastCommandSucceeded 'Restormer stage 1'
+
+  $le = Join-Path $stage1Dir "best_le_$RestormerModelName.pth"
+  $db = Join-Path $stage1Dir "best_deblur_$RestormerModelName.pth"
+  if (!(Test-Path $le)) { throw "Stage 1 failed: missing $le" }
+  if (!(Test-Path $db)) { throw "Stage 1 failed: missing $db" }
+
+  Write-Host '=== Restormer: Stage 2 (BlurDM prior) ===' -ForegroundColor Cyan
+  $env:MASTER_PORT = '29632'
+  python src/Restormer/train_stage2.py `
+    --data_path $DataPath `
+    --dir_path $stage2Dir `
+    --model_le_path $le `
+    --model_name $Restormer_Stage2DmName `
+    --num_workers $NumWorkers `
+    --batch_size $BatchSize `
+    --crop_size $CropSize `
+    --end_epoch $EndEpoch `
+    --validation_epoch $ValidationEpoch `
+    --check_point_epoch $CheckpointEpoch
+  Assert-LastCommandSucceeded 'Restormer stage 2'
+
+  $dm = Join-Path $stage2Dir "best_dm_$Restormer_Stage2DmName.pth"
+  if (!(Test-Path $dm)) { throw "Stage 2 failed: missing $dm" }
+
+  Write-Host '=== Restormer: Stage 3 (joint fine-tuning) ===' -ForegroundColor Cyan
+  $env:MASTER_PORT = '29633'
+  python src/Restormer/train_stage3.py `
+    --data_path $DataPath `
+    --dir_path $stage3Dir `
+    --model_name $RestormerModelName `
+    --model $RestormerModelName `
+    --deblur_path $db `
+    --dm_path $dm `
+    --num_workers $NumWorkers `
+    --batch_size $BatchSize `
+    --crop_size $CropSize `
+    --end_epoch $EndEpoch `
+    --validation_epoch $ValidationEpoch `
+    --check_point_epoch $CheckpointEpoch `
+    --val_save_epochs $ValSaveEpochs
+  Assert-LastCommandSucceeded 'Restormer stage 3'
+}
+
 Write-Host "Backbone: $Backbone | OutRoot: $OutRoot" -ForegroundColor Green
 
 switch ($Backbone) {
   'MIMO_UNet' { Invoke-MIMO }
   'NAFNet' { Invoke-NAFNet }
+  'Restormer' { Invoke-Restormer }
 }
 
 Write-Host "All 3 stages completed successfully. Checkpoints under: $OutRoot" -ForegroundColor Green

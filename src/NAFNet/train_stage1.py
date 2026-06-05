@@ -53,6 +53,7 @@ from MIMO_UNet.models.losses import (
     DeblurLoss, CharbonnierLoss, VGGPerceptualLoss, L1andPerceptualLoss,
 )
 from NAFNet.models.NAFNetBlurDM import build_NAFNet
+from Restormer.models.RestormerBlurDM import build_Restormer
 from utils.utils import (
     AverageMeter, batch_psnr, count_parameters,
     judge_and_remove_module_dict, tensor2cv,
@@ -180,6 +181,13 @@ def build_deblur_net(
         return build_MIMOUnet_net(model_name)
     if model_name.startswith("NAFNetBlurDM"):
         return build_NAFNet(
+            model_name,
+            grad_ckpt=grad_ckpt,
+            drop_path_rate=drop_path_rate,
+            use_cross_attn=use_cross_attn,
+        )
+    if model_name.startswith("RestormerBlurDM"):
+        return build_Restormer(
             model_name,
             grad_ckpt=grad_ckpt,
             drop_path_rate=drop_path_rate,

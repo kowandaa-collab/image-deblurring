@@ -30,6 +30,7 @@ from dataloader import Test_Loader
 from MIMO_UNet.models.MIMOUNetBlurDM import build_MIMOUnet_net
 from MIMO_UNet.models.LatentBlurDM import LatentExposureDiffusion
 from NAFNet.models.NAFNetBlurDM import build_NAFNet
+from Restormer.models.RestormerBlurDM import build_Restormer
 from utils.utils import judge_and_remove_module_dict, count_parameters
 
 
@@ -42,6 +43,8 @@ def build_deblur_net(model_name: str) -> nn.Module:
         return build_MIMOUnet_net(model_name)
     if model_name.startswith("NAFNetBlurDM"):
         return build_NAFNet(model_name)
+    if model_name.startswith("RestormerBlurDM"):
+        return build_Restormer(model_name)
     raise ValueError(f"Unknown model: {model_name}")
 
 

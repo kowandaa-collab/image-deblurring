@@ -8,7 +8,8 @@ $runs = @(
     @{ Name = "MIMO_UNet_GoPro";           Src = "results\MIMO_UNet\GoPro\GoPro" },
     @{ Name = "NAFNet_GoPro";              Src = "results\NAFNet\GoPro\GoPro" },
     @{ Name = "NAFNet_GoPro_tta";          Src = "results\NAFNet\GoPro_tta\GoPro" },
-    @{ Name = "NAFNet_GoPro_full";         Src = "results\NAFNet\GoPro_full\GoPro" }
+    @{ Name = "NAFNet_GoPro_full";         Src = "results\NAFNet\GoPro_full\GoPro" },
+    @{ Name = "Restormer_GoPro";           Src = "results\Restormer\GoPro\GoPro" }
 )
 
 foreach ($r in $runs) {

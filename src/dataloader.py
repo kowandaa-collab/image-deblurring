@@ -9,6 +9,9 @@ Improvements over the original:
   - Test_Loader and Test_Loader_DDP merged into one class (DDP flag)
   - JPEG + PNG + JPG file extensions all supported in glob patterns
   - get_image() helper is a clean standalone function
+  - MixUpDataset, CutMixDataset, WeightedMultiDataset for data augmentation
+  - make_dataloader factory with persistent workers and prefetch
+  - jpeg_aug, noise_aug, gamma_aug, channel_shuffle, cache_images support
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ from typing import Callable
 import cv2
 import numpy as np
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from torchvision import transforms
 
 
@@ -95,6 +98,52 @@ class ToTensor:
         }
 
 
+class JpegAug:
+    """Randomly compress images with JPEG at quality 40–95."""
+
+    def __call__(self, data: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        quality = random.randint(40, 95)
+        for key in data:
+            img_bgr = cv2.cvtColor(data[key].astype(np.uint8), cv2.COLOR_RGB2BGR)
+            _, enc = cv2.imencode(".jpg", img_bgr, [cv2.IMWRITE_JPEG_QUALITY, quality])
+            dec = cv2.imdecode(enc, cv2.IMREAD_COLOR)
+            data[key] = cv2.cvtColor(dec, cv2.COLOR_BGR2RGB).astype(np.float32)
+        return data
+
+
+class NoiseAug:
+    """Add Gaussian noise with std in [0, 25] to the blur image only."""
+
+    def __call__(self, data: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        sigma = random.uniform(0, 25)
+        data["blur"] = np.clip(
+            data["blur"] + np.random.randn(*data["blur"].shape) * sigma, 0, 255
+        ).astype(np.float32)
+        return data
+
+
+class GammaAug:
+    """Apply random gamma correction in [0.6, 1.4] to the blur image only."""
+
+    def __call__(self, data: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        gamma = random.uniform(0.6, 1.4)
+        lut = np.array([((i / 255.0) ** (1.0 / gamma)) * 255
+                        for i in range(256)], dtype=np.uint8)
+        data["blur"] = lut[data["blur"].astype(np.uint8)].astype(np.float32)
+        return data
+
+
+class ChannelShuffle:
+    """Randomly permute RGB channels in both blur and sharp."""
+
+    def __call__(self, data: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        perm = list(range(3))
+        random.shuffle(perm)
+        for key in data:
+            data[key] = data[key][:, :, perm]
+        return data
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -116,13 +165,29 @@ def _read_rgb(path: str) -> np.ndarray:
     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32)
 
 
-def _make_transform(crop_size: int | None, zero_to_one: bool, augment: bool) -> Callable:
+def _make_transform(
+    crop_size: int | None,
+    zero_to_one: bool,
+    augment: bool,
+    jpeg_aug: bool = False,
+    noise_aug: bool = False,
+    gamma_aug: bool = False,
+    channel_shuffle: bool = False,
+) -> Callable:
     steps: list[Callable] = []
     if crop_size:
         steps.append(RandomCrop(crop_size, crop_size))
     if augment:
         steps.append(RandomFlip())
         steps.append(RandomRotate())
+        if jpeg_aug:
+            steps.append(JpegAug())
+        if noise_aug:
+            steps.append(NoiseAug())
+        if gamma_aug:
+            steps.append(GammaAug())
+        if channel_shuffle:
+            steps.append(ChannelShuffle())
     steps.append(Normalize(zero_to_one))
     steps.append(ToTensor())
     return transforms.Compose(steps)
@@ -145,15 +210,37 @@ class PairedImageDataset(Dataset):
         mode: str = "train",
         crop_size: int | None = None,
         zero_to_one: bool = False,
+        ZeroToOne: bool | None = None,  # alias for zero_to_one
         augment: bool = True,
+        jpeg_aug: bool = False,
+        noise_aug: bool = False,
+        gamma_aug: bool = False,
+        channel_shuffle: bool = False,
+        cache_images: bool = False,
     ) -> None:
+        # ZeroToOne keyword alias (used by RealBlur_Loader callers)
+        if ZeroToOne is not None:
+            zero_to_one = ZeroToOne
+
         self.blur_list: list[str] = []
         self.sharp_list: list[str] = []
         self._collect_lists(data_path, mode)
         assert len(self.blur_list) == len(self.sharp_list), (
             f"Length mismatch: {len(self.blur_list)} blur vs {len(self.sharp_list)} sharp"
         )
-        self.transform = _make_transform(crop_size, zero_to_one, augment and mode == "train")
+        self.transform = _make_transform(
+            crop_size, zero_to_one, augment and mode == "train",
+            jpeg_aug=jpeg_aug, noise_aug=noise_aug,
+            gamma_aug=gamma_aug, channel_shuffle=channel_shuffle,
+        )
+
+        self._cache: dict[int, dict] | None = {} if cache_images else None
+        if cache_images:
+            for i in range(len(self.blur_list)):
+                self._cache[i] = {
+                    "blur":  _read_rgb(self.blur_list[i]),
+                    "sharp": _read_rgb(self.sharp_list[i]),
+                }
 
     def _collect_lists(self, data_path: str, mode: str) -> None:
         raise NotImplementedError
@@ -162,10 +249,13 @@ class PairedImageDataset(Dataset):
         return len(self.blur_list)
 
     def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
-        sample = {
-            "blur":  _read_rgb(self.blur_list[idx]),
-            "sharp": _read_rgb(self.sharp_list[idx]),
-        }
+        if self._cache is not None:
+            sample = {k: v.copy() for k, v in self._cache[idx].items()}
+        else:
+            sample = {
+                "blur":  _read_rgb(self.blur_list[idx]),
+                "sharp": _read_rgb(self.sharp_list[idx]),
+            }
         return self.transform(sample)
 
 
@@ -189,6 +279,105 @@ class RealBlur_Loader(PairedImageDataset):
             sharp_dir = os.path.join(data_path, mode, "sharp", scene)
             self.blur_list.extend(_glob_images(blur_dir))
             self.sharp_list.extend(_glob_images(sharp_dir))
+
+
+# ---------------------------------------------------------------------------
+# Augmentation wrapper datasets
+# ---------------------------------------------------------------------------
+
+class MixUpDataset(Dataset):
+    """Applies MixUp augmentation: blends two samples with Beta-sampled weight."""
+
+    def __init__(self, dataset: Dataset, alpha: float = 0.4, prob: float = 0.5) -> None:
+        self.dataset = dataset
+        self.alpha   = alpha
+        self.prob    = prob
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        sample = self.dataset[idx]
+        if random.random() < self.prob:
+            idx2    = random.randint(0, len(self.dataset) - 1)
+            sample2 = self.dataset[idx2]
+            lam     = float(np.random.beta(self.alpha, self.alpha))
+            sample  = {k: lam * sample[k] + (1.0 - lam) * sample2[k] for k in sample}
+        return sample
+
+
+class CutMixDataset(Dataset):
+    """Applies CutMix augmentation: pastes a rectangular region from another sample."""
+
+    def __init__(self, dataset: Dataset, alpha: float = 1.0, prob: float = 0.5) -> None:
+        self.dataset = dataset
+        self.alpha   = alpha
+        self.prob    = prob
+
+    def __len__(self) -> int:
+        return len(self.dataset)
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        sample = self.dataset[idx]
+        if random.random() < self.prob:
+            idx2    = random.randint(0, len(self.dataset) - 1)
+            sample2 = self.dataset[idx2]
+            lam     = float(np.random.beta(self.alpha, self.alpha))
+            _, H, W = sample["blur"].shape
+            cut_h   = int(H * (1.0 - lam) ** 0.5)
+            cut_w   = int(W * (1.0 - lam) ** 0.5)
+            cx      = random.randint(0, W)
+            cy      = random.randint(0, H)
+            x1 = max(0, cx - cut_w // 2); x2 = min(W, cx + cut_w // 2)
+            y1 = max(0, cy - cut_h // 2); y2 = min(H, cy + cut_h // 2)
+            sample  = {k: v.clone() for k, v in sample.items()}
+            for k in sample:
+                sample[k][:, y1:y2, x1:x2] = sample2[k][:, y1:y2, x1:x2]
+        return sample
+
+
+class WeightedMultiDataset(Dataset):
+    """Combines multiple datasets, sampling each with given probability weights."""
+
+    def __init__(self, datasets: list[Dataset], weights: list[float]) -> None:
+        assert len(datasets) == len(weights)
+        self.datasets = datasets
+        total = sum(weights)
+        self.weights  = [w / total for w in weights]
+        self._len     = sum(len(d) for d in datasets)
+
+    def __len__(self) -> int:
+        return self._len
+
+    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+        ds  = random.choices(self.datasets, weights=self.weights)[0]
+        i   = random.randint(0, len(ds) - 1)
+        return ds[i]
+
+
+# ---------------------------------------------------------------------------
+# DataLoader factory
+# ---------------------------------------------------------------------------
+
+def make_dataloader(
+    dataset: Dataset,
+    batch_size: int,
+    sampler=None,
+    num_workers: int = 0,
+    **kwargs,
+) -> DataLoader:
+    """Create a DataLoader with sensible defaults for image deblurring."""
+    kw: dict = dict(
+        batch_size=batch_size,
+        sampler=sampler,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+    if num_workers > 0:
+        kw["persistent_workers"] = True
+        kw["prefetch_factor"]    = 2
+    kw.update(kwargs)
+    return DataLoader(dataset, **kw)
 
 
 # ---------------------------------------------------------------------------

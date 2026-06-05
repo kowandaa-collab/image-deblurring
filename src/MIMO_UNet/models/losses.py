@@ -189,6 +189,86 @@ class GANLoss(nn.Module):
         return F.binary_cross_entropy_with_logits(logits, labels)
 
 
+class DeblurLoss(nn.Module):
+    """Combined deblurring loss: Charbonnier + optional edge/SSIM/focal-freq/perceptual.
+
+    Uses learnable uncertainty weighting (log_vars) to auto-balance terms.
+    """
+
+    def __init__(
+        self,
+        use_perceptual: bool = False,
+        use_edge: bool = True,
+        use_ssim: bool = True,
+        use_focal_freq: bool = True,
+    ) -> None:
+        super().__init__()
+        self.charbonnier    = CharbonnierLoss()
+        self.use_perceptual = use_perceptual
+        self.use_edge       = use_edge
+        self.use_ssim       = use_ssim
+        self.use_focal_freq = use_focal_freq
+        if use_perceptual:
+            self.perceptual = VGGPerceptualLoss()
+        n_terms = 1 + int(use_edge) + int(use_ssim) + int(use_focal_freq) + int(use_perceptual)
+        self.log_vars = nn.Parameter(torch.zeros(n_terms))
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        losses: list[torch.Tensor] = [self.charbonnier(pred, target)]
+        if self.use_edge:
+            losses.append(self._edge_loss(pred, target))
+        if self.use_ssim:
+            losses.append(self._ssim_loss(pred, target))
+        if self.use_focal_freq:
+            losses.append(self._focal_freq_loss(pred, target))
+        if self.use_perceptual:
+            losses.append(self.perceptual(pred, target))
+        return sum(
+            torch.exp(-self.log_vars[i]) * l + self.log_vars[i]
+            for i, l in enumerate(losses)
+        )
+
+    @staticmethod
+    def _edge_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        sx = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]],
+                          dtype=pred.dtype, device=pred.device).view(1, 1, 3, 3)
+        sy = sx.transpose(2, 3)
+        def edges(x: torch.Tensor) -> torch.Tensor:
+            luma = x.mean(1, keepdim=True)
+            return torch.sqrt(F.conv2d(luma, sx, padding=1)**2
+                              + F.conv2d(luma, sy, padding=1)**2 + 1e-6)
+        return F.l1_loss(edges(pred), edges(target))
+
+    @staticmethod
+    def _ssim_loss(pred: torch.Tensor, target: torch.Tensor,
+                   window_size: int = 11) -> torch.Tensor:
+        C1, C2 = 0.01**2, 0.03**2
+        coords = torch.arange(window_size, dtype=pred.dtype, device=pred.device) - window_size // 2
+        g = torch.exp(-(coords**2) / (2 * 1.5**2))
+        g = g / g.sum()
+        win = g.outer(g).unsqueeze(0).unsqueeze(0)
+        C   = pred.shape[1]
+        win = win.expand(C, 1, window_size, window_size)
+        pad = window_size // 2
+        mu1 = F.conv2d(pred,   win, padding=pad, groups=C)
+        mu2 = F.conv2d(target, win, padding=pad, groups=C)
+        s1  = F.conv2d(pred*pred,     win, padding=pad, groups=C) - mu1**2
+        s2  = F.conv2d(target*target, win, padding=pad, groups=C) - mu2**2
+        s12 = F.conv2d(pred*target,   win, padding=pad, groups=C) - mu1*mu2
+        ssim = ((2*mu1*mu2 + C1) * (2*s12 + C2)) / ((mu1**2 + mu2**2 + C1) * (s1 + s2 + C2))
+        return 1.0 - ssim.mean()
+
+    @staticmethod
+    def _focal_freq_loss(pred: torch.Tensor, target: torch.Tensor,
+                         alpha: float = 1.0) -> torch.Tensor:
+        pf   = torch.fft.rfft2(pred,   norm="ortho")
+        tf   = torch.fft.rfft2(target, norm="ortho")
+        diff = (pf - tf).abs()
+        w    = (diff.detach() ** alpha)
+        w    = w / (w.mean() + 1e-8)
+        return (w * diff).mean()
+
+
 def wgan_gp_loss(
     discriminator: nn.Module,
     real: torch.Tensor,

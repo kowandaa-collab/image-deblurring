@@ -1,16 +1,8 @@
 """
-train_stage2.py — Latent Diffusion Prior training (Stage 2) for NAFNet backbone.
+train_stage2.py — Latent Diffusion Prior training (Stage 2) for Stripformer.
 
-Stage 2 freezes the Latent Encoder trained in Stage 1 and trains the
-LatentExposureDiffusion model to predict the same latent vector using
-only the blurry image (no sharp reference).
-
-Improvements vs original:
-  - Cosine similarity loss added alongside L1 (helps with directional alignment)
-  - Latent-space PSNR metric logged for tracking prior quality
-  - AMP support
-  - EMA on the diffusion model
-  - Works with both MIMO-UNet and NAFNet latent spaces (same LE_arch output dim)
+Freezes the latent encoder from Stage 1 and trains the LatentExposureDiffusion
+to predict latent vectors from blurry images.
 """
 
 from __future__ import annotations
@@ -36,11 +28,11 @@ parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(parent_dir)
 
 from dataloader import Multi_GoPro_Loader, RealBlur_Loader
-from MIMO_UNet.models.LatentEncoder import LE_arch
-from MIMO_UNet.models.LatentBlurDM import LatentExposureDiffusion
-from MIMO_UNet.models.losses import CharbonnierLoss
+from Stripformer.models.LatentEncoder import LE_arch
+from Stripformer.models.LatentBlurDM import LatentExposureDiffusion
+from Stripformer.models.losses import CharbonnierLoss
 from utils.utils import AverageMeter, count_parameters, judge_and_remove_module_dict
-from NAFNet.train_stage1 import WarmupCosineScheduler, make_dataset, setup_ddp
+from Stripformer.train_stage1 import WarmupCosineScheduler, make_dataset, setup_ddp
 
 from tensorboardX import SummaryWriter
 
@@ -49,17 +41,7 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cuda.matmul.allow_tf32 = True
 
 
-# ---------------------------------------------------------------------------
-# Combined latent loss
-# ---------------------------------------------------------------------------
-
 class LatentMatchingLoss(nn.Module):
-    """L1 + cosine similarity loss for latent vector matching.
-
-    Cosine loss encourages the predicted latent to point in the same
-    direction as the ground truth, which L1 alone doesn't guarantee.
-    """
-
     def __init__(self, cosine_weight: float = 0.1) -> None:
         super().__init__()
         self.l1  = CharbonnierLoss()
@@ -71,13 +53,7 @@ class LatentMatchingLoss(nn.Module):
         return l_l1 + self.cos_w * l_cos
 
 
-# ---------------------------------------------------------------------------
-# Trainer
-# ---------------------------------------------------------------------------
-
 class Trainer:
-    """Stage-2 trainer: train diffusion prior with frozen latent encoder."""
-
     def __init__(
         self,
         dataloader_train: DataLoader,
@@ -91,8 +67,8 @@ class Trainer:
     ) -> None:
         self.dataloader_train = dataloader_train
         self.dataloader_val   = dataloader_val
-        self.model_le = model_le  # frozen
-        self.model_dm = model_dm  # trainable
+        self.model_le = model_le
+        self.model_dm = model_dm
         self.optimizer  = optimizer
         self.scheduler  = scheduler
         self.args   = args
@@ -102,8 +78,6 @@ class Trainer:
         self.best_loss = float("inf")
         self.scaler = GradScaler(enabled=args.amp)
         self.criterion = LatentMatchingLoss(cosine_weight=0.1)
-
-    # ------------------------------------------------------------------
 
     def train(self) -> None:
         rank = dist.get_rank() if dist.is_initialized() else 0
@@ -122,13 +96,11 @@ class Trainer:
                     self.valid()
                 self.save_model()
 
-    # ------------------------------------------------------------------
-
     def _train_epoch(self) -> None:
         if hasattr(self.dataloader_train.sampler, "set_epoch"):
             self.dataloader_train.sampler.set_epoch(self.epoch)
 
-        self.model_le.eval()    # frozen
+        self.model_le.eval()
         self.model_dm.train()
 
         loss_m = AverageMeter()
@@ -163,8 +135,6 @@ class Trainer:
             self.writer.add_scalar("Loss/train", loss_m.avg, self.epoch)
             logging.info(f"Epoch {self.epoch}: loss={loss_m.avg:.6f}")
 
-    # ------------------------------------------------------------------
-
     @torch.no_grad()
     def valid(self) -> None:
         self.model_le.eval()
@@ -194,8 +164,6 @@ class Trainer:
             )
             print(f"  ✓ New best latent loss: {self.best_loss:.6f}")
 
-    # ------------------------------------------------------------------
-
     def save_model(self) -> None:
         raw = self.model_dm.module if hasattr(self.model_dm, "module") else self.model_dm
         state = {
@@ -214,12 +182,8 @@ class Trainer:
             )
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="BlurDM Stage 2 — Diffusion Prior")
+    parser = argparse.ArgumentParser(description="Stripformer Stage 2 — Diffusion Prior")
     parser.add_argument("--end_epoch",         default=3000, type=int)
     parser.add_argument("--start_epoch",       default=1,    type=int)
     parser.add_argument("--batch_size",        default=16,   type=int)
@@ -231,9 +195,9 @@ if __name__ == "__main__":
     parser.add_argument("--warmup_epochs",     default=5,    type=int)
     parser.add_argument("--grad_clip",         default=1.0,  type=float)
     parser.add_argument("--optimizer",         default="adamw", choices=["adam", "adamw"])
-    parser.add_argument("--model_name",        default="BlurDM", type=str)
+    parser.add_argument("--model_name",        default="Stripformer", type=str)
     parser.add_argument("--data_path",         default="./dataset/GOPRO_Large", type=str)
-    parser.add_argument("--dir_path",          default="./experiments/NAFNet/GoPro/stage2", type=str)
+    parser.add_argument("--dir_path",          default="./experiments/Stripformer/GoPro/stage2", type=str)
     parser.add_argument("--model_le_path",     required=True, type=str,
                         help="Path to Stage 1 best_le_*.pth")
     parser.add_argument("--seed",              default=2023, type=int)
@@ -260,7 +224,6 @@ if __name__ == "__main__":
     for p in net_le.parameters():
         p.requires_grad_(False)
 
-    # Optimizer (DM only)
     if args.optimizer == "adamw":
         optimizer = optim.AdamW(net_dm.parameters(), lr=args.init_lr, weight_decay=1e-4)
     else:
@@ -287,9 +250,6 @@ if __name__ == "__main__":
         os.makedirs(args.dir_path, exist_ok=True)
 
     num_gpus = max(torch.cuda.device_count(), 1)
-    # Frozen latent encoder has no trainable parameters — DDP raises:
-    # "not needed when a module doesn't have any parameter that requires a gradient".
-    # Only the diffusion prior is trained; keep LE as a plain module on this rank's GPU.
     net_dm = nn.parallel.DistributedDataParallel(net_dm, device_ids=[args.local_rank])
 
     train_set = make_dataset(args.data_path, "train", args.crop_size)

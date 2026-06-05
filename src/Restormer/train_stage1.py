@@ -49,6 +49,7 @@ import torch.optim as optim
 import cv2
 cv2.setNumThreads(0)
 torch.backends.cudnn.benchmark = True
+torch.backends.cuda.matmul.allow_tf32 = True
 
 
 def build_deblur_net(

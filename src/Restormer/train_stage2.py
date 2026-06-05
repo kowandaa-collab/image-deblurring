@@ -45,6 +45,7 @@ import cv2
 
 cv2.setNumThreads(0)
 torch.backends.cudnn.benchmark = True
+torch.backends.cuda.matmul.allow_tf32 = True
 
 
 if __name__ == "__main__":

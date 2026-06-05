@@ -38,8 +38,7 @@ cv2.setNumThreads(0)
 # Enable cuDNN optimizations for faster training on GPUs
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
-# Ensure reproducible results by forcing deterministic algorithms
-torch.backends.cudnn.deterministic = True
+torch.backends.cuda.matmul.allow_tf32 = True
 
 # --- FFT Compatibility Polyfill ---
 # Retained for compatibility, though seemingly unused in this specific stage's loss function
@@ -324,7 +323,7 @@ if __name__ == "__main__":
     seed = args.seed + args.local_rank
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = True
-    torch.backends.cudnn.deterministic = True
+    torch.backends.cuda.matmul.allow_tf32 = True
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     torch.cuda.manual_seed(seed)

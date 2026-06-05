@@ -1,21 +1,8 @@
 """
-train_stage1.py v4 — Joint LE + backbone training with maximum speed.
+train_stage1.py — Joint LE + backbone training for Stripformer.
 
-Speed improvements in v4:
-  - torch.compile() support: --compile compiles both models with
-    mode='reduce-overhead', giving 20-40% throughput gain on Ampere+
-  - Gradient accumulation: --accum_steps N accumulates gradients over N
-    micro-batches before stepping, enabling effective batch sizes that don't
-    fit in VRAM
-  - DataLoader uses persistent_workers + prefetch_factor=2 via make_dataloader
-  - --cache_images preloads entire dataset into RAM (eliminates disk I/O
-    after epoch 1 on systems with enough RAM)
-  - Validation runs only on a random subset when val_subset > 0 (fast check)
-  - PSNR computed with vectorised batch_psnr (no per-sample Python loop)
-  - Gradient clipping uses foreach=True (fused CUDA kernel, ~2× faster)
-  - Stochastic depth rate and gradient checkpointing passed to model builder
-
-All v3 features retained (EMA, AMP, MixUp, CutMix, multi-dataset, etc.)
+This mirrors the structure of the other models' stage1 scripts
+and trains the backbone together with the latent encoder.
 """
 
 from __future__ import annotations
@@ -47,13 +34,11 @@ from dataloader import (
     MixUpDataset, CutMixDataset, WeightedMultiDataset,
     make_dataloader,
 )
-from MIMO_UNet.models.MIMOUNetBlurDM import build_MIMOUnet_net
-from MIMO_UNet.models.LatentEncoder import LE_arch
-from MIMO_UNet.models.losses import (
-    DeblurLoss, CharbonnierLoss, VGGPerceptualLoss, L1andPerceptualLoss,
+from Stripformer.models.StripformerBlurDM import get_nets
+from Stripformer.models.LatentEncoder import LE_arch
+from Stripformer.models.losses import (
+    CharbonnierLoss, VGGPerceptualLoss, L1andPerceptualLoss,
 )
-from NAFNet.models.NAFNetBlurDM import build_NAFNet
-from Restormer.models.RestormerBlurDM import build_Restormer
 from utils.utils import (
     AverageMeter, batch_psnr, count_parameters,
     judge_and_remove_module_dict, tensor2cv,
@@ -90,7 +75,7 @@ class ModelEMA:
 
 
 # ---------------------------------------------------------------------------
-# FFT loss
+# FFT loss (reuse same helper)
 # ---------------------------------------------------------------------------
 
 def fft_loss(criterion, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -153,7 +138,7 @@ def setup_ddp(local_rank: int):
 
 
 # ---------------------------------------------------------------------------
-# Dataset / model factories
+# Dataset / model factory
 # ---------------------------------------------------------------------------
 
 def make_dataset(
@@ -172,35 +157,11 @@ def make_dataset(
     raise ValueError(f"Unrecognised dataset: '{name}'.")
 
 
-def build_deblur_net(
-    model_name: str,
-    grad_ckpt: bool = False,
-    drop_path_rate: float = 0.0,
-    use_cross_attn: bool = False,
-) -> nn.Module:
-    if model_name == "MIMOUNetBlurDM":
-        return build_MIMOUnet_net(model_name)
-    if model_name.startswith("NAFNetBlurDM"):
-        return build_NAFNet(
-            model_name,
-            grad_ckpt=grad_ckpt,
-            drop_path_rate=drop_path_rate,
-            use_cross_attn=use_cross_attn,
-        )
-    if model_name.startswith("RestormerBlurDM"):
-        return build_Restormer(
-            model_name,
-            grad_ckpt=grad_ckpt,
-            drop_path_rate=drop_path_rate,
-            use_cross_attn=use_cross_attn,
-        )
-    raise ValueError(f"Unknown model '{model_name}'.")
+def build_deblur_net(model_name: str) -> nn.Module:
+    return get_nets(model_name)
 
 
 def build_criterion(args) -> nn.Module:
-    if args.criterion == "deblur":
-        return DeblurLoss(use_perceptual=args.use_perceptual,
-                          use_edge=True, use_ssim=True, use_focal_freq=True)
     if args.criterion == "l1":
         return CharbonnierLoss()
     if args.criterion == "perceptual":
@@ -239,8 +200,6 @@ class Trainer:
         self.lpips_func = pyiqa.create_metric("lpips", device=self.device)
         self.criterion  = build_criterion(args).to(self.device)
 
-    # ------------------------------------------------------------------
-
     def train(self) -> None:
         rank = dist.get_rank() if dist.is_initialized() else 0
         if rank == 0:
@@ -267,24 +226,11 @@ class Trainer:
                     self.val_save_image(self.args.dir_path, self.dataloader_val.dataset)
                 self.save_model()
 
-    # ------------------------------------------------------------------
-
-    def _compute_loss(self, outputs, sharp):
-        gt_2 = F.interpolate(sharp, scale_factor=0.5,  mode="bilinear", align_corners=False)
-        gt_4 = F.interpolate(sharp, scale_factor=0.25, mode="bilinear", align_corners=False)
-        if isinstance(self.criterion, DeblurLoss):
-            return (self.criterion(outputs[0], gt_4)
-                    + self.criterion(outputs[1], gt_2)
-                    + self.criterion(outputs[2], sharp))
-        pixel = (self.criterion(outputs[0], gt_4)
-                 + self.criterion(outputs[1], gt_2)
-                 + self.criterion(outputs[2], sharp))
-        freq  = (fft_loss(CharbonnierLoss(), outputs[0], gt_4)
-                 + fft_loss(CharbonnierLoss(), outputs[1], gt_2)
-                 + fft_loss(CharbonnierLoss(), outputs[2], sharp))
+    def _compute_loss(self, output: torch.Tensor, sharp: torch.Tensor) -> torch.Tensor:
+        # StripformerPrior returns a single full-resolution tensor, not a list.
+        pixel = self.criterion(output, sharp)
+        freq  = fft_loss(CharbonnierLoss(), output, sharp)
         return pixel + self.args.fft_weight * freq
-
-    # ------------------------------------------------------------------
 
     def _train_epoch(self) -> None:
         if hasattr(self.dataloader_train.sampler, "set_epoch"):
@@ -303,15 +249,14 @@ class Trainer:
             sharp = sample["sharp"].to(self.device, non_blocking=True)
 
             with autocast(enabled=self.args.amp):
-                z    = self.model_le(blur, sharp)
-                out  = [o.clamp(-0.5, 0.5) for o in self.model(blur, z)]
+                z   = self.model_le(blur, sharp)
+                out = self.model(blur, z).clamp(-0.5, 0.5)
                 loss = self._compute_loss(out, sharp) / self.accum_steps
 
             self.scaler.scale(loss).backward()
 
             if (step + 1) % self.accum_steps == 0:
                 self.scaler.unscale_(self.optimizer)
-                # foreach=True: PyTorch 2.0+ fused CUDA kernel (~2× faster)
                 _clip_params = list(self.model.parameters()) + list(self.model_le.parameters())
                 _clip_kw = {}
                 if "foreach" in inspect.signature(nn.utils.clip_grad_norm_).parameters:
@@ -324,7 +269,7 @@ class Trainer:
                     self.ema.update(self.model)
 
             loss_m.update(loss.item() * self.accum_steps)
-            psnr_m.update(batch_psnr(out[2].detach(), sharp.detach()))
+            psnr_m.update(batch_psnr(out.detach(), sharp.detach()))
             tq.set_postfix(
                 loss=f"{loss_m.avg:.4f}", psnr=f"{psnr_m.avg:.2f}",
                 lr=f"{self.optimizer.param_groups[0]['lr']:.2e}",
@@ -337,12 +282,7 @@ class Trainer:
         if self.writer and rank == 0:
             self.writer.add_scalar("Loss/train", loss_m.avg, self.epoch)
             self.writer.add_scalar("PSNR/train", psnr_m.avg, self.epoch)
-            if isinstance(self.criterion, DeblurLoss):
-                for i, lv in enumerate(self.criterion.log_vars):
-                    self.writer.add_scalar(f"LossWeight/term{i}", lv.item(), self.epoch)
             logging.info(f"Ep{self.epoch}: loss={loss_m.avg:.4f} psnr={psnr_m.avg:.2f}")
-
-    # ------------------------------------------------------------------
 
     @torch.no_grad()
     def valid(self) -> None:
@@ -352,7 +292,6 @@ class Trainer:
         lpips_m = AverageMeter("lpips")
 
         val_loader = self.dataloader_val
-        # Fast validation: sample a random subset if requested
         if self.args.val_subset > 0:
             indices = random.sample(range(len(self.dataloader_val.dataset)),
                                     min(self.args.val_subset, len(self.dataloader_val.dataset)))
@@ -364,9 +303,9 @@ class Trainer:
             sharp = sample["sharp"].to(self.device, non_blocking=True)
             with autocast(enabled=self.args.amp):
                 z   = self.model_le(blur, sharp)
-                out = [o.clamp(-0.5, 0.5) for o in self.model(blur, z)]
-            psnr_m.update( self.psnr_func( out[2]+0.5, sharp+0.5).mean().item())
-            lpips_m.update(self.lpips_func(out[2]+0.5, sharp+0.5).mean().item())
+                out = self.model(blur, z).clamp(-0.5, 0.5)
+            psnr_m.update( self.psnr_func( out + 0.5, sharp + 0.5).mean().item())
+            lpips_m.update(self.lpips_func(out + 0.5, sharp + 0.5).mean().item())
 
         if self.writer:
             self.writer.add_scalar("Val/psnr",  psnr_m.avg,  self.epoch)
@@ -380,7 +319,7 @@ class Trainer:
             print(f"  ✓ Best PSNR: {self.best_psnr:.3f}")
 
     def _save_best(self) -> None:
-        raw_m  = self.model.module    if hasattr(self.model,    "module") else self.model
+        raw_m  = self.model.module    if hasattr(self.model, "module") else self.model
         raw_le = self.model_le.module if hasattr(self.model_le, "module") else self.model_le
         torch.save({"model_state":    raw_m.state_dict(),  "args": self.args},
                    os.path.join(self.args.dir_path, f"best_deblur_{self.args.model_name}.pth"))
@@ -390,10 +329,8 @@ class Trainer:
             torch.save({"model_state": self.ema.state_dict()},
                        os.path.join(self.args.dir_path, f"best_ema_{self.args.model_name}.pth"))
 
-    # ------------------------------------------------------------------
-
     def save_model(self) -> None:
-        raw_m  = self.model.module    if hasattr(self.model,    "module") else self.model
+        raw_m  = self.model.module    if hasattr(self.model, "module") else self.model
         raw_le = self.model_le.module if hasattr(self.model_le, "module") else self.model_le
         state  = {
             "epoch":           self.epoch,
@@ -416,8 +353,6 @@ class Trainer:
                 self.args.dir_path, f"epoch_{self.epoch}_{self.args.model_name}.pth"
             ))
 
-    # ------------------------------------------------------------------
-
     @torch.no_grad()
     def val_save_image(self, dir_path: str, dataset, val_num: int = 4) -> None:
         self.model.eval()
@@ -436,7 +371,7 @@ class Trainer:
             bp = F.pad(blur,  (0, pw, 0, ph), mode="reflect")
             sp = F.pad(sharp, (0, pw, 0, ph), mode="reflect")
             z  = self.model_le(bp, sp)
-            o  = self.model(bp, z)[2][:, :, :h, :w].clamp(-0.5, 0.5)
+            o  = self.model(bp, z)[:, :, :h, :w].clamp(-0.5, 0.5)
             cv2.imwrite(os.path.join(out_dir,   f"{self.epoch:05d}_{idx:05d}.png"), tensor2cv(o + 0.5))
             cv2.imwrite(os.path.join(sharp_dir, f"{self.epoch:05d}_{idx:05d}.png"), tensor2cv(sharp + 0.5))
 
@@ -464,26 +399,24 @@ if __name__ == "__main__":
     p.add_argument("--grad_clip",         default=1.0,   type=float)
     p.add_argument("--gamma",             default=0.1,   type=float)
     p.add_argument("--optimizer",         default="adamw", choices=["adam","adamw"])
-    p.add_argument("--criterion",         default="deblur",
-                   choices=["deblur","l1","perceptual","l1perceptual"])
-    p.add_argument("--model_name",   default="NAFNetBlurDM-light")
-    p.add_argument("--model",        default="NAFNetBlurDM-light")
+    p.add_argument("--criterion",         default="l1",
+                   choices=["l1","perceptual","l1perceptual"])
+    p.add_argument("--model_name",   default="StripformerPrior")
+    p.add_argument("--model",        default="StripformerPrior")
     p.add_argument("--data_path",    default="./dataset/GOPRO_Large")
     p.add_argument("--data_path2",   default=None)
     p.add_argument("--data_weight",  default=0.7,   type=float)
-    p.add_argument("--dir_path",     default="./experiments/NAFNet/GoPro/stage1")
+    p.add_argument("--dir_path",     default="./experiments/Stripformer/GoPro/stage1")
     p.add_argument("--seed",         default=2023,  type=int)
     p.add_argument("--val_save_epochs", default=100, type=int)
     p.add_argument("--resume",       default=None)
     p.add_argument("--num_workers",  default=0 if os.name=="nt" else 8, type=int)
     p.add_argument("--local_rank",   default=int(os.getenv("LOCAL_RANK", -1)), type=int)
-    # Speed flags
     p.add_argument("--amp",      action="store_true", help="Mixed precision (AMP)")
     p.add_argument("--compile",  action="store_true", help="torch.compile() both models")
     p.add_argument("--grad_ckpt",action="store_true", help="Gradient checkpointing (saves VRAM)")
     p.add_argument("--cache_images", action="store_true", help="Cache dataset in RAM")
     p.add_argument("--drop_path_rate", default=0.0, type=float)
-    # Quality flags
     p.add_argument("--ema",            action="store_true")
     p.add_argument("--mixup",          action="store_true")
     p.add_argument("--cutmix",         action="store_true")
@@ -492,8 +425,6 @@ if __name__ == "__main__":
     p.add_argument("--gamma_aug",      action="store_true")
     p.add_argument("--channel_shuffle",action="store_true")
     p.add_argument("--use_perceptual", action="store_true")
-    p.add_argument("--use_cross_attn", action="store_true",
-                   help="Cross-attention prior injection (richer than FiLM)")
     args = p.parse_args()
 
     device, args.local_rank = setup_ddp(args.local_rank)
@@ -504,18 +435,13 @@ if __name__ == "__main__":
     random.seed(seed); np.random.seed(seed)
     torch.manual_seed(seed); torch.cuda.manual_seed_all(seed)
 
-    net    = build_deblur_net(args.model_name,
-                               grad_ckpt=args.grad_ckpt,
-                               drop_path_rate=args.drop_path_rate,
-                               use_cross_attn=args.use_cross_attn).to(device)
+    net    = build_deblur_net(args.model_name).to(device)
     net_le = LE_arch().to(device)
 
-    # ── torch.compile ────────────────────────────────────────────────────
     if args.compile and hasattr(torch, "compile"):
         print("Compiling models with torch.compile(mode='reduce-overhead') …")
         net    = torch.compile(net,    mode="reduce-overhead")
         net_le = torch.compile(net_le, mode="reduce-overhead")
-    # ─────────────────────────────────────────────────────────────────────
 
     all_params = list(net.parameters()) + list(net_le.parameters())
     _adamw_extra = {}
@@ -528,14 +454,12 @@ if __name__ == "__main__":
     )
     scheduler = WarmupCosineScheduler(optimizer, args.warmup_epochs, args.end_epoch, args.min_lr)
 
-    # Checkpoint resume
     map_loc   = {"cuda:0": f"cuda:{args.local_rank}"}
     ckpt_path = os.path.join(args.dir_path, f"last_{args.model_name}.pth")
     if os.path.exists(ckpt_path):
         state = torch.load(ckpt_path, map_location=map_loc)
         args.start_epoch = state["epoch"] + 1
         args.best_psnr   = state.get("best_psnr", 0.0)
-        # Strip _orig_mod. prefix added by torch.compile
         for key in ("model_state", "model_le_state"):
             net_target = net if key == "model_state" else net_le
             raw = net_target._orig_mod if hasattr(net_target, "_orig_mod") else net_target
@@ -555,7 +479,6 @@ if __name__ == "__main__":
     net    = nn.parallel.DistributedDataParallel(net,    device_ids=[args.local_rank])
     net_le = nn.parallel.DistributedDataParallel(net_le, device_ids=[args.local_rank])
 
-    # Datasets
     ds_kw  = dict(jpeg_aug=args.jpeg_aug, noise_aug=args.noise_aug,
                   gamma_aug=args.gamma_aug, channel_shuffle=args.channel_shuffle,
                   cache_images=args.cache_images)

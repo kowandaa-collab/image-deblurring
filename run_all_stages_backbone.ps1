@@ -4,12 +4,14 @@
   Usage:
     .\run_all_stages_backbone.ps1 -Backbone MIMO_UNet
     .\run_all_stages_backbone.ps1 -Backbone NAFNet -CropSize 256 -BatchSize 8
+    .\run_all_stages_backbone.ps1 -Backbone Stripformer -CropSize 256 -BatchSize 4
+    .\run_all_stages_backbone.ps1 -Backbone Restormer -CropSize 256 -BatchSize 4
 
   Default OutRoot when -OutRoot is omitted:
-    NAFNet   -> <repo>\experiments\NAFNet\GoPro
-    MIMO_UNet -> D:\BlurDM_experiments\MIMO_UNet\GoPro
-
-  Stripformer: this repo has no train_stage*.py under src/Stripformer (only models + deblur_predict_ddp.py).
+    NAFNet       -> <repo>\experiments\NAFNet\GoPro
+    Restormer    -> <repo>\experiments\Restormer\GoPro
+    Stripformer  -> <repo>\experiments\Stripformer\GoPro
+    MIMO_UNet    -> D:\BlurDM_experiments\MIMO_UNet\GoPro
 #>
 param(
   [Parameter(Mandatory = $false)]
@@ -34,26 +36,25 @@ param(
   [string]$NAFNet_Stage2DmName = 'BlurDM',
   # Restormer stage1/3 model name and stage2 prior name
   [string]$RestormerModelName = 'RestormerBlurDM-light',
-  [string]$Restormer_Stage2DmName = 'BlurDM'
+  [string]$Restormer_Stage2DmName = 'BlurDM',
+  # Stripformer stage2 dm checkpoint name (default Stripformer in train_stage2.py)
+  [string]$Stripformer_Stage2DmName = 'Stripformer',
+
+  # Speed flags (passed to every stage that supports them)
+  [switch]$Amp,           # Mixed-precision FP16 (~1.5-2x faster on RTX 40-series)
+  [int]$AccumSteps = 1    # Gradient accumulation (effective batch = BatchSize * AccumSteps)
 )
 
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
-if ($Backbone -eq 'Stripformer') {
-  Write-Error @'
-Stripformer training is not available in this checkout: there are no train_stage1/2/3.py under src/Stripformer.
-Only models and src/Stripformer/deblur_predict_ddp.py exist. Train MIMO_UNet or NAFNet, or add Stripformer training scripts from upstream.
-'@
-  exit 1
-}
-
 if ([string]::IsNullOrWhiteSpace($OutRoot)) {
   if ($Backbone -eq 'NAFNet') {
-    # Project-local experiments (same layout as MIMO: .../NAFNet/GoPro/stage{1,2,3})
     $OutRoot = Join-Path $PSScriptRoot 'experiments\NAFNet\GoPro'
   } elseif ($Backbone -eq 'Restormer') {
     $OutRoot = Join-Path $PSScriptRoot 'experiments\Restormer\GoPro'
+  } elseif ($Backbone -eq 'Stripformer') {
+    $OutRoot = Join-Path $PSScriptRoot 'experiments\Stripformer\GoPro'
   } else {
     $OutRoot = "D:/BlurDM_experiments/$Backbone/GoPro"
   }
@@ -142,7 +143,9 @@ function Invoke-NAFNet {
     --end_epoch $EndEpoch `
     --validation_epoch $ValidationEpoch `
     --check_point_epoch $CheckpointEpoch `
-    --val_save_epochs $ValSaveEpochs
+    --val_save_epochs $ValSaveEpochs `
+    --accum_steps $AccumSteps `
+    @(if ($Amp) { '--amp' })
   Assert-LastCommandSucceeded 'NAFNet stage 1'
 
   $le = Join-Path $stage1Dir "best_le_$NAFNetModelName.pth"
@@ -162,7 +165,8 @@ function Invoke-NAFNet {
     --crop_size $CropSize `
     --end_epoch $EndEpoch `
     --validation_epoch $ValidationEpoch `
-    --check_point_epoch $CheckpointEpoch
+    --check_point_epoch $CheckpointEpoch `
+    @(if ($Amp) { '--amp' })
   Assert-LastCommandSucceeded 'NAFNet stage 2'
 
   $dm = Join-Path $stage2Dir "best_dm_$NAFNet_Stage2DmName.pth"
@@ -183,7 +187,8 @@ function Invoke-NAFNet {
     --end_epoch $EndEpoch `
     --validation_epoch $ValidationEpoch `
     --check_point_epoch $CheckpointEpoch `
-    --val_save_epochs $ValSaveEpochs
+    --val_save_epochs $ValSaveEpochs `
+    @(if ($Amp) { '--amp' })
   Assert-LastCommandSucceeded 'NAFNet stage 3'
 }
 
@@ -246,12 +251,68 @@ function Invoke-Restormer {
   Assert-LastCommandSucceeded 'Restormer stage 3'
 }
 
+function Invoke-Stripformer {
+  Write-Host '=== Stripformer: Stage 1 (backbone + latent encoder) ===' -ForegroundColor Cyan
+  $env:MASTER_PORT = '29631'
+  python src/Stripformer/train_stage1.py `
+    --data_path $DataPath `
+    --dir_path $stage1Dir `
+    --num_workers $NumWorkers `
+    --batch_size $BatchSize `
+    --crop_size $CropSize `
+    --end_epoch $EndEpoch `
+    --validation_epoch $ValidationEpoch `
+    --check_point_epoch $CheckpointEpoch `
+    --val_save_epochs $ValSaveEpochs
+  Assert-LastCommandSucceeded 'Stripformer stage 1'
+
+  $le = Join-Path $stage1Dir 'best_le_StripformerPrior.pth'
+  $db = Join-Path $stage1Dir 'best_deblur_StripformerPrior.pth'
+  if (!(Test-Path $le)) { throw "Stage 1 failed: missing $le" }
+  if (!(Test-Path $db)) { throw "Stage 1 failed: missing $db" }
+
+  Write-Host '=== Stripformer: Stage 2 (BlurDM prior) ===' -ForegroundColor Cyan
+  $env:MASTER_PORT = '29632'
+  python src/Stripformer/train_stage2.py `
+    --data_path $DataPath `
+    --dir_path $stage2Dir `
+    --model_le_path $le `
+    --model_name $Stripformer_Stage2DmName `
+    --num_workers $NumWorkers `
+    --batch_size $BatchSize `
+    --crop_size $CropSize `
+    --end_epoch $EndEpoch `
+    --validation_epoch $ValidationEpoch `
+    --check_point_epoch $CheckpointEpoch
+  Assert-LastCommandSucceeded 'Stripformer stage 2'
+
+  $dm = Join-Path $stage2Dir "best_dm_$Stripformer_Stage2DmName.pth"
+  if (!(Test-Path $dm)) { throw "Stage 2 failed: missing $dm" }
+
+  Write-Host '=== Stripformer: Stage 3 (joint fine-tuning) ===' -ForegroundColor Cyan
+  $env:MASTER_PORT = '29633'
+  python src/Stripformer/train_stage3.py `
+    --data_path $DataPath `
+    --dir_path $stage3Dir `
+    --deblur_path $db `
+    --dm_path $dm `
+    --num_workers $NumWorkers `
+    --batch_size $BatchSize `
+    --crop_size $CropSize `
+    --end_epoch $EndEpoch `
+    --validation_epoch $ValidationEpoch `
+    --check_point_epoch $CheckpointEpoch `
+    --val_save_epochs $ValSaveEpochs
+  Assert-LastCommandSucceeded 'Stripformer stage 3'
+}
+
 Write-Host "Backbone: $Backbone | OutRoot: $OutRoot" -ForegroundColor Green
 
 switch ($Backbone) {
-  'MIMO_UNet' { Invoke-MIMO }
-  'NAFNet' { Invoke-NAFNet }
-  'Restormer' { Invoke-Restormer }
+  'MIMO_UNet'   { Invoke-MIMO }
+  'NAFNet'      { Invoke-NAFNet }
+  'Restormer'   { Invoke-Restormer }
+  'Stripformer' { Invoke-Stripformer }
 }
 
 Write-Host "All 3 stages completed successfully. Checkpoints under: $OutRoot" -ForegroundColor Green

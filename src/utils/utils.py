@@ -122,8 +122,18 @@ def create_concat_noise(image_tensor, mean=0, std=1, num_channels=4, num_dim=1):
 
     return noisy_image_tensor
 
+def batch_psnr(pred: "torch.Tensor", target: "torch.Tensor") -> float:
+    """Mean PSNR over a batch. Both tensors in [-0.5, 0.5]."""
+    pred_np   = ((pred   + 0.5).clamp(0, 1) * 255).detach().cpu().numpy()
+    target_np = ((target + 0.5).clamp(0, 1) * 255).detach().cpu().numpy()
+    mse = np.mean((pred_np / 255.0 - target_np / 255.0) ** 2, axis=(1, 2, 3))
+    psnr = np.where(mse < 1e-10, 100.0, 20.0 * np.log10(1.0 / (np.sqrt(mse) + 1e-12)))
+    return float(psnr.mean())
+
+
 class AverageMeter(object):
-    def __init__(self):
+    def __init__(self, name: str = "") -> None:
+        self.name = name
         self.reset()
 
     def reset(self):

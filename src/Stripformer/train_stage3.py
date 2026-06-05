@@ -1,15 +1,7 @@
 """
-train_stage3.py — Joint fine-tuning of NAFNet + Diffusion Prior (Stage 3).
+train_stage3.py — Joint fine-tuning of Stripformer + Diffusion Prior (Stage 3).
 
-This stage takes the pre-trained NAFNet (Stage 1) and Diffusion Prior
-(Stage 2) and fine-tunes them together end-to-end at full image quality.
-
-Key additions vs the MIMO-UNet version:
-  - Lower learning rate by default (fine-tuning schedule)
-  - Warm restarts optional via --cosine_restarts
-  - Auxiliary supervised diffusion loss on mid-outputs (if model supports it)
-  - SSIM-weighted loss option for perceptual quality
-  - AMP + EMA throughout
+Fine-tunes the backbone and diffusion prior together end-to-end.
 """
 
 from __future__ import annotations
@@ -36,15 +28,15 @@ parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(parent_dir)
 
 from dataloader import Multi_GoPro_Loader, RealBlur_Loader
-from MIMO_UNet.models.LatentBlurDM import LatentExposureDiffusion
-from MIMO_UNet.models.losses import CharbonnierLoss, VGGPerceptualLoss, L1andPerceptualLoss
-from NAFNet.models.NAFNetBlurDM import build_NAFNet
-from MIMO_UNet.models.MIMOUNetBlurDM import build_MIMOUnet_net
+from Stripformer.models.LatentBlurDM import LatentExposureDiffusion
+from Stripformer.models.losses import CharbonnierLoss, VGGPerceptualLoss, L1andPerceptualLoss
+from Stripformer.models.StripformerBlurDM import get_nets
+from Stripformer.models.LatentEncoder import LE_arch
 from utils.utils import (
     AverageMeter, calc_psnr, count_parameters,
     judge_and_remove_module_dict, tensor2cv,
 )
-from NAFNet.train_stage1 import (
+from Stripformer.train_stage1 import (
     WarmupCosineScheduler, ModelEMA, fft_loss,
     make_dataset, setup_ddp, build_deblur_net,
 )
@@ -57,13 +49,7 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cuda.matmul.allow_tf32 = True
 
 
-# ---------------------------------------------------------------------------
-# Trainer
-# ---------------------------------------------------------------------------
-
 class Trainer:
-    """Stage-3 trainer: end-to-end NAFNet + diffusion prior fine-tuning."""
-
     def __init__(
         self,
         dataloader_train: DataLoader,
@@ -88,7 +74,6 @@ class Trainer:
         self.best_psnr = getattr(args, "best_psnr", 0.0)
         self.scaler = GradScaler(enabled=args.amp)
 
-        # EMA on the backbone (NAFNet)
         raw = model.module if hasattr(model, "module") else model
         self.ema = ModelEMA(raw, decay=0.9995) if args.ema else None
 
@@ -103,10 +88,7 @@ class Trainer:
             self.criterion = L1andPerceptualLoss(gamma=args.gamma).to(self.device)
         else:
             raise ValueError(f"Unknown criterion '{args.criterion}'.")
-        # FFT loss operates on stacked real/imag tensors, so keep it pixel-domain.
         self.fft_criterion = CharbonnierLoss()
-
-    # ------------------------------------------------------------------
 
     def train(self) -> None:
         rank = dist.get_rank() if dist.is_initialized() else 0
@@ -129,29 +111,15 @@ class Trainer:
                     self.val_save_image(self.args.dir_path, self.dataloader_val.dataset)
                 self.save_model()
 
-    # ------------------------------------------------------------------
-
     def _compute_loss(
         self,
-        outputs: list[torch.Tensor],
+        output: torch.Tensor,
         sharp: torch.Tensor,
     ) -> torch.Tensor:
-        gt_2 = F.interpolate(sharp, scale_factor=0.5,  mode="bilinear", align_corners=False)
-        gt_4 = F.interpolate(sharp, scale_factor=0.25, mode="bilinear", align_corners=False)
-
-        l_pixel = (
-            self.criterion(outputs[0], gt_4)
-            + self.criterion(outputs[1], gt_2)
-            + self.criterion(outputs[2], sharp)
-        )
-        l_freq = (
-            fft_loss(self.fft_criterion, outputs[0], gt_4)
-            + fft_loss(self.fft_criterion, outputs[1], gt_2)
-            + fft_loss(self.fft_criterion, outputs[2], sharp)
-        )
+        # StripformerPrior returns a single full-resolution tensor, not a list.
+        l_pixel = self.criterion(output, sharp)
+        l_freq  = fft_loss(self.fft_criterion, output, sharp)
         return l_pixel + self.args.fft_weight * l_freq
-
-    # ------------------------------------------------------------------
 
     def _train_epoch(self) -> None:
         if hasattr(self.dataloader_train.sampler, "set_epoch"):
@@ -171,7 +139,7 @@ class Trainer:
             self.optimizer.zero_grad(set_to_none=True)
             with autocast(enabled=self.args.amp):
                 prior = self.model_dm(blur)
-                out   = [o.clamp(-0.5, 0.5) for o in self.model(blur, prior)]
+                out   = self.model(blur, prior).clamp(-0.5, 0.5)
                 loss  = self._compute_loss(out, sharp)
 
             self.scaler.scale(loss).backward()
@@ -188,7 +156,7 @@ class Trainer:
                 self.ema.update(raw)
 
             loss_m.update(loss.item())
-            psnr_m.update(calc_psnr(out[2].detach(), sharp.detach()))
+            psnr_m.update(calc_psnr(out.detach(), sharp.detach()))
             tq.set_postfix(loss=f"{loss_m.avg:.4f}", psnr=f"{psnr_m.avg:.2f}",
                            lr=f"{self.optimizer.param_groups[0]['lr']:.2e}")
 
@@ -201,8 +169,6 @@ class Trainer:
             self.writer.add_scalar("PSNR/train", psnr_m.avg, self.epoch)
             logging.info(f"Epoch {self.epoch}: loss={loss_m.avg:.4f} psnr={psnr_m.avg:.2f}")
 
-    # ------------------------------------------------------------------
-
     @torch.no_grad()
     def valid(self) -> None:
         self.model.eval()
@@ -214,9 +180,9 @@ class Trainer:
             blur  = sample["blur"].to(self.device)
             sharp = sample["sharp"].to(self.device)
             prior = self.model_dm(blur)
-            out   = [o.clamp(-0.5, 0.5) for o in self.model(blur, prior)]
-            psnr_m.update(self.psnr_func(out[2] + 0.5, sharp + 0.5).mean().item())
-            lpips_m.update(self.lpips_func(out[2] + 0.5, sharp + 0.5).mean().item())
+            out   = self.model(blur, prior).clamp(-0.5, 0.5)
+            psnr_m.update(self.psnr_func(out + 0.5, sharp + 0.5).mean().item())
+            lpips_m.update(self.lpips_func(out + 0.5, sharp + 0.5).mean().item())
 
         if self.writer:
             self.writer.add_scalar("Val/psnr",  psnr_m.avg,  self.epoch)
@@ -243,8 +209,6 @@ class Trainer:
                 )
             print(f"  ✓ New best PSNR: {self.best_psnr:.3f}")
 
-    # ------------------------------------------------------------------
-
     def save_model(self) -> None:
         raw_m  = self.model.module    if hasattr(self.model, "module")    else self.model
         raw_dm = self.model_dm.module if hasattr(self.model_dm, "module") else self.model_dm
@@ -266,8 +230,6 @@ class Trainer:
                 os.path.join(self.args.dir_path, f"epoch_{self.epoch}_{self.args.model_name}.pth"),
             )
 
-    # ------------------------------------------------------------------
-
     @torch.no_grad()
     def val_save_image(self, dir_path: str, dataset, val_num: int = 3) -> None:
         self.model.eval()
@@ -287,7 +249,7 @@ class Trainer:
             blur_p = F.pad(blur, (0, pw, 0, ph), mode="reflect")
 
             prior = self.model_dm(blur_p)
-            out   = self.model(blur_p, prior)[2][:, :, :h, :w].clamp(-0.5, 0.5)
+            out   = self.model(blur_p, prior)[:, :, :h, :w].clamp(-0.5, 0.5)
 
             cv2.imwrite(
                 os.path.join(out_dir,   f"{self.epoch:05d}_{idx:05d}.png"),
@@ -299,12 +261,8 @@ class Trainer:
             )
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="BlurDM Stage 3 — Joint Fine-Tuning")
+    parser = argparse.ArgumentParser(description="Stripformer Stage 3 — Joint Fine-Tuning")
     parser.add_argument("--end_epoch",         default=3000,  type=int)
     parser.add_argument("--start_epoch",       default=1,     type=int)
     parser.add_argument("--batch_size",        default=8,     type=int)
@@ -321,10 +279,10 @@ if __name__ == "__main__":
     parser.add_argument("--optimizer",         default="adamw", choices=["adam", "adamw"])
     parser.add_argument("--criterion",         default="l1perceptual",
                         choices=["l1", "perceptual", "l1perceptual"])
-    parser.add_argument("--model_name",  default="NAFNetBlurDM-light", type=str)
-    parser.add_argument("--model",       default="NAFNetBlurDM-light", type=str)
+    parser.add_argument("--model_name",  default="StripformerPrior", type=str)
+    parser.add_argument("--model",       default="StripformerPrior", type=str)
     parser.add_argument("--data_path",   default="./dataset/GOPRO_Large", type=str)
-    parser.add_argument("--dir_path",    default="./experiments/NAFNet/GoPro/stage3", type=str)
+    parser.add_argument("--dir_path",    default="./experiments/Stripformer/GoPro/stage3", type=str)
     parser.add_argument("--deblur_path", required=True, type=str,
                         help="Path to Stage 1 best_deblur_*.pth")
     parser.add_argument("--dm_path",     required=True, type=str,
@@ -351,11 +309,9 @@ if __name__ == "__main__":
 
     map_loc = {"cuda:0": f"cuda:{args.local_rank}"}
 
-    # Load pre-trained Stage 1 backbone
     s1 = torch.load(args.deblur_path, map_location=map_loc)
     net.load_state_dict(judge_and_remove_module_dict(s1["model_state"]))
 
-    # Load pre-trained Stage 2 diffusion prior
     s2 = torch.load(args.dm_path, map_location=map_loc)
     net_dm.load_state_dict(judge_and_remove_module_dict(s2["model_dm_state"]))
 

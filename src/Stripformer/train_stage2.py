@@ -84,7 +84,7 @@ class Trainer:
         if rank == 0:
             print(f"{'='*50}")
             print(f"  Stage 2: Diffusion Prior Training")
-            print(f"  Epochs: {self.args.start_epoch} → {self.args.end_epoch}")
+            print(f"  Epochs: {self.args.start_epoch} -> {self.args.end_epoch}")
             print(f"  AMP: {self.args.amp}")
             print(f"{'='*50}")
 

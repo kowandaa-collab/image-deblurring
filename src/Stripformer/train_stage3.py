@@ -96,7 +96,7 @@ class Trainer:
             print(f"{'='*50}")
             print(f"  Stage 3: Joint Fine-Tuning")
             print(f"  Backbone : {self.args.model_name}")
-            print(f"  Epochs   : {self.args.start_epoch} → {self.args.end_epoch}")
+            print(f"  Epochs   : {self.args.start_epoch} -> {self.args.end_epoch}")
             print(f"{'='*50}")
 
         for epoch in range(self.args.start_epoch, self.args.end_epoch + 1):

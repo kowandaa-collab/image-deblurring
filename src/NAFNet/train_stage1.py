@@ -252,7 +252,7 @@ class Trainer:
             print(f"  Compile          : {self.args.compile}")
             print(f"  Grad Checkpoint  : {self.args.grad_ckpt}")
             print(f"  Accum steps      : {self.accum_steps} (eff. batch {eff_bs})")
-            print(f"  Epochs           : {self.args.start_epoch}→{self.args.end_epoch}")
+            print(f"  Epochs           : {self.args.start_epoch}->{self.args.end_epoch}")
             print(f"{'='*58}\n")
 
         for epoch in range(self.args.start_epoch, self.args.end_epoch + 1):
@@ -377,7 +377,7 @@ class Trainer:
             self.best_psnr = psnr_m.avg
             self.args.best_psnr = self.best_psnr
             self._save_best()
-            print(f"  ✓ Best PSNR: {self.best_psnr:.3f}")
+            print(f"  [best] PSNR: {self.best_psnr:.3f}")
 
     def _save_best(self) -> None:
         raw_m  = self.model.module    if hasattr(self.model,    "module") else self.model
@@ -512,7 +512,7 @@ if __name__ == "__main__":
 
     # ── torch.compile ────────────────────────────────────────────────────
     if args.compile and hasattr(torch, "compile"):
-        print("Compiling models with torch.compile(mode='reduce-overhead') …")
+        print("Compiling models with torch.compile(mode='reduce-overhead')...")
         net    = torch.compile(net,    mode="reduce-overhead")
         net_le = torch.compile(net_le, mode="reduce-overhead")
     # ─────────────────────────────────────────────────────────────────────

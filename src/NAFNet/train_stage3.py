@@ -114,7 +114,7 @@ class Trainer:
             print(f"{'='*50}")
             print(f"  Stage 3: Joint Fine-Tuning")
             print(f"  Backbone : {self.args.model_name}")
-            print(f"  Epochs   : {self.args.start_epoch} → {self.args.end_epoch}")
+            print(f"  Epochs   : {self.args.start_epoch} -> {self.args.end_epoch}")
             print(f"{'='*50}")
 
         for epoch in range(self.args.start_epoch, self.args.end_epoch + 1):
@@ -241,7 +241,7 @@ class Trainer:
                     {"model_state": self.ema.state_dict()},
                     os.path.join(self.args.dir_path, f"best_ema_{self.args.model_name}.pth"),
                 )
-            print(f"  ✓ New best PSNR: {self.best_psnr:.3f}")
+            print(f"  [best] PSNR: {self.best_psnr:.3f}")
 
     # ------------------------------------------------------------------
 

@@ -110,7 +110,7 @@ class Trainer:
         if rank == 0:
             print(f"{'='*50}")
             print(f"  Stage 2: Diffusion Prior Training")
-            print(f"  Epochs: {self.args.start_epoch} → {self.args.end_epoch}")
+            print(f"  Epochs: {self.args.start_epoch} -> {self.args.end_epoch}")
             print(f"  AMP: {self.args.amp}")
             print(f"{'='*50}")
 
@@ -192,7 +192,7 @@ class Trainer:
                 {"model_dm_state": raw.state_dict(), "args": self.args},
                 os.path.join(self.args.dir_path, f"best_dm_{self.args.model_name}.pth"),
             )
-            print(f"  ✓ New best latent loss: {self.best_loss:.6f}")
+            print(f"  [best] latent loss: {self.best_loss:.6f}")
 
     # ------------------------------------------------------------------
 

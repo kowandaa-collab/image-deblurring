@@ -211,7 +211,7 @@ class Trainer:
             print(f"  Compile          : {self.args.compile}")
             print(f"  Grad Checkpoint  : {self.args.grad_ckpt}")
             print(f"  Accum steps      : {self.accum_steps} (eff. batch {eff_bs})")
-            print(f"  Epochs           : {self.args.start_epoch}→{self.args.end_epoch}")
+            print(f"  Epochs           : {self.args.start_epoch}->{self.args.end_epoch}")
             print(f"{'='*58}\n")
 
         for epoch in range(self.args.start_epoch, self.args.end_epoch + 1):

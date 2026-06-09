@@ -35,7 +35,7 @@ from torch.utils.data.distributed import DistributedSampler
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(parent_dir)
 
-from dataloader import Multi_GoPro_Loader, RealBlur_Loader
+from dataloader import Multi_GoPro_Loader, RealBlur_Loader, make_dataloader
 from MIMO_UNet.models.LatentBlurDM import LatentExposureDiffusion
 from MIMO_UNet.models.losses import CharbonnierLoss, VGGPerceptualLoss, L1andPerceptualLoss
 from NAFNet.models.NAFNetBlurDM import build_NAFNet
@@ -334,8 +334,12 @@ if __name__ == "__main__":
     parser.add_argument("--resume",      default=None, type=str)
     parser.add_argument("--num_workers", default=0 if os.name == "nt" else 8, type=int)
     parser.add_argument("--local_rank",  default=int(os.getenv("LOCAL_RANK", -1)), type=int)
-    parser.add_argument("--amp", action="store_true")
-    parser.add_argument("--ema", action="store_true")
+    parser.add_argument("--amp",          action="store_true")
+    parser.add_argument("--ema",          action="store_true")
+    parser.add_argument("--compile",      action="store_true",
+                        help="torch.compile() both models (reduce-overhead, ~30pct faster)")
+    parser.add_argument("--cache_images", action="store_true",
+                        help="Cache GoPro dataset in RAM after epoch 1")
     args = parser.parse_args()
 
     device, args.local_rank = setup_ddp(args.local_rank)
@@ -387,17 +391,22 @@ if __name__ == "__main__":
     else:
         os.makedirs(args.dir_path, exist_ok=True)
 
+    if args.compile and hasattr(torch, "compile"):
+        print("Compiling models with torch.compile(mode='reduce-overhead')...")
+        net    = torch.compile(net,    mode="reduce-overhead")
+        net_dm = torch.compile(net_dm, mode="reduce-overhead")
+
     net    = nn.parallel.DistributedDataParallel(net,    device_ids=[args.local_rank])
     net_dm = nn.parallel.DistributedDataParallel(net_dm, device_ids=[args.local_rank])
 
-    train_set = make_dataset(args.data_path, "train", args.crop_size)
+    train_set = make_dataset(args.data_path, "train", args.crop_size,
+                             cache_images=args.cache_images)
     val_set   = make_dataset(args.data_path, "test",  args.crop_size)
     train_sampler = DistributedSampler(train_set)
-    dataloader_train = DataLoader(train_set, sampler=train_sampler,
-                                  batch_size=args.batch_size // num_gpus,
-                                  num_workers=args.num_workers, pin_memory=True)
-    dataloader_val   = DataLoader(val_set, batch_size=args.batch_size // num_gpus,
-                                  shuffle=False, num_workers=args.num_workers, pin_memory=True)
+    dataloader_train = make_dataloader(train_set, batch_size=args.batch_size // num_gpus,
+                                       num_workers=args.num_workers, sampler=train_sampler)
+    dataloader_val   = make_dataloader(val_set,   batch_size=args.batch_size // num_gpus,
+                                       num_workers=args.num_workers, shuffle=False)
 
     writer = None
     rank = dist.get_rank() if dist.is_initialized() else 0

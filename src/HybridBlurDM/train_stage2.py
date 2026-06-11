@@ -1,13 +1,9 @@
 """
-train_stage2.py — Latent Diffusion Prior training (Stage 2) for Restormer.
+train_stage2.py — Latent Diffusion Prior training (Stage 2) for HybridBlurDM.
 
-Stage 2 is backbone-agnostic: it freezes the Latent Encoder (LE_arch) from
-Stage 1 and trains LatentExposureDiffusion to predict the same latent from
-only the blurry image (no sharp reference).
-
-This script is identical to NAFNet/train_stage2.py except for the default
-output directory path.  Restormer's Stage 1 produces a LE checkpoint in the
-same format as NAFNet's, so no other changes are needed.
+Stage 2 is fully backbone-agnostic: it freezes the Stage-1 LE_arch and trains
+LatentExposureDiffusion to predict the latent prior from only the blurry image.
+Identical to FFTformer/train_stage2.py; only the default dir_path differs.
 """
 
 from __future__ import annotations
@@ -15,33 +11,27 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import random
 import sys
 
+import cv2
 import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
-import tqdm
-from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(parent_dir)
 
-from dataloader import Multi_GoPro_Loader, RealBlur_Loader
 from MIMO_UNet.models.LatentEncoder import LE_arch
 from MIMO_UNet.models.LatentBlurDM import LatentExposureDiffusion
-from MIMO_UNet.models.losses import CharbonnierLoss
-from utils.utils import AverageMeter, count_parameters, judge_and_remove_module_dict
+from utils.utils import count_parameters, judge_and_remove_module_dict
 from NAFNet.train_stage1 import WarmupCosineScheduler, make_dataset, setup_ddp
-from NAFNet.train_stage2 import Trainer, LatentMatchingLoss   # reuse unchanged classes
-
+from NAFNet.train_stage2 import Trainer, LatentMatchingLoss
 from tensorboardX import SummaryWriter
-import random
-import cv2
 
 cv2.setNumThreads(0)
 torch.backends.cudnn.benchmark = True
@@ -49,7 +39,9 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="BlurDM Stage 2 — Diffusion Prior (Restormer)")
+    parser = argparse.ArgumentParser(
+        description="HybridBlurDM Stage 2 — Diffusion Prior training"
+    )
     parser.add_argument("--end_epoch",         default=3000, type=int)
     parser.add_argument("--start_epoch",       default=1,    type=int)
     parser.add_argument("--batch_size",        default=16,   type=int)
@@ -63,18 +55,22 @@ if __name__ == "__main__":
     parser.add_argument("--optimizer",         default="adamw", choices=["adam", "adamw"])
     parser.add_argument("--model_name",        default="BlurDM", type=str)
     parser.add_argument("--data_path",         default="./dataset/GOPRO_Large", type=str)
-    parser.add_argument("--dir_path",          default="./experiments/Restormer/GoPro/stage2", type=str)
-    parser.add_argument("--model_le_path",     required=True, type=str,
+    parser.add_argument("--dir_path",
+                        default="./experiments/HybridBlurDM/GoPro/stage2", type=str)
+    parser.add_argument("--model_le_path", required=True, type=str,
                         help="Path to Stage 1 best_le_*.pth")
-    parser.add_argument("--seed",              default=2023, type=int)
-    parser.add_argument("--resume",            default=None, type=str)
-    parser.add_argument("--num_workers",       default=0 if os.name == "nt" else 8, type=int)
-    parser.add_argument("--local_rank",        default=int(os.getenv("LOCAL_RANK", -1)), type=int)
-    parser.add_argument("--amp",  action="store_true")
+    parser.add_argument("--seed",              default=2023,  type=int)
+    parser.add_argument("--resume",            default=None,  type=str)
+    parser.add_argument("--num_workers",
+                        default=0 if os.name == "nt" else 8, type=int)
+    parser.add_argument("--local_rank",
+                        default=int(os.getenv("LOCAL_RANK", -1)), type=int)
+    parser.add_argument("--amp", action="store_true")
     args = parser.parse_args()
 
     device, args.local_rank = setup_ddp(args.local_rank)
     args.device = device
+    num_gpus = max(torch.cuda.device_count(), 1)
 
     seed = args.seed + args.local_rank
     random.seed(seed); np.random.seed(seed)
@@ -83,26 +79,28 @@ if __name__ == "__main__":
     net_le = LE_arch().to(device)
     net_dm = LatentExposureDiffusion().to(device)
 
-    le_state = torch.load(args.model_le_path, map_location={"cuda:0": f"cuda:{args.local_rank}"})
+    map_loc  = {"cuda:0": f"cuda:{args.local_rank}"}
+    le_state = torch.load(args.model_le_path, map_location=map_loc)
     net_le.load_state_dict(judge_and_remove_module_dict(le_state["model_le_state"]))
     for p in net_le.parameters():
         p.requires_grad_(False)
 
-    if args.optimizer == "adamw":
-        optimizer = optim.AdamW(net_dm.parameters(), lr=args.init_lr, weight_decay=1e-4)
-    else:
-        optimizer = optim.Adam(net_dm.parameters(), lr=args.init_lr)
+    optimizer = (
+        optim.AdamW(net_dm.parameters(), lr=args.init_lr, weight_decay=1e-4)
+        if args.optimizer == "adamw"
+        else optim.Adam(net_dm.parameters(), lr=args.init_lr)
+    )
+    scheduler = WarmupCosineScheduler(
+        optimizer, args.warmup_epochs, args.end_epoch, args.min_lr
+    )
 
-    scheduler = WarmupCosineScheduler(optimizer, args.warmup_epochs, args.end_epoch, args.min_lr)
-
-    map_loc = {"cuda:0": f"cuda:{args.local_rank}"}
     ckpt = os.path.join(args.dir_path, f"last_{args.model_name}.pth")
     if os.path.exists(ckpt):
         state = torch.load(ckpt, map_location=map_loc)
         args.start_epoch = state["epoch"] + 1
         net_dm.load_state_dict(judge_and_remove_module_dict(state["model_dm_state"]))
         optimizer.load_state_dict(state["optimizer_state"])
-        if state["scheduler_state"]:
+        if state.get("scheduler_state"):
             scheduler.load_state_dict(state["scheduler_state"])
     elif args.resume:
         state = torch.load(args.resume, map_location=map_loc)
@@ -111,7 +109,6 @@ if __name__ == "__main__":
     else:
         os.makedirs(args.dir_path, exist_ok=True)
 
-    num_gpus = max(torch.cuda.device_count(), 1)
     net_dm = nn.parallel.DistributedDataParallel(net_dm, device_ids=[args.local_rank])
 
     train_set = make_dataset(args.data_path, "train", args.crop_size)

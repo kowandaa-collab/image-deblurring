@@ -230,7 +230,9 @@ class Trainer:
         self.device = args.device
         self.epoch  = 0
         self.best_psnr  = getattr(args, "best_psnr", 0.0)
-        self.scaler     = GradScaler(enabled=args.amp)
+        # init_scale=2**13 (8192) is conservative vs the default 65536 — less
+        # likely to overflow Restormer's large attention maps under AMP.
+        self.scaler     = GradScaler(enabled=args.amp, init_scale=2**13)
         self.accum_steps = max(1, args.accum_steps)
 
         self.ema = ModelEMA(model, 0.999) if args.ema else None
@@ -306,6 +308,13 @@ class Trainer:
                 z    = self.model_le(blur, sharp)
                 out  = [o.clamp(-0.5, 0.5) for o in self.model(blur, z)]
                 loss = self._compute_loss(out, sharp) / self.accum_steps
+
+            if not torch.isfinite(loss):
+                logging.warning(
+                    f"Ep{self.epoch} step {step}: non-finite loss={loss.item():.6g}, skipping batch"
+                )
+                self.optimizer.zero_grad(set_to_none=True)
+                continue
 
             self.scaler.scale(loss).backward()
 

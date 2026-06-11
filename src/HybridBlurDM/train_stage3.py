@@ -1,11 +1,15 @@
 """
-train_stage3.py — Joint fine-tuning of Restormer + Diffusion Prior (Stage 3).
+train_stage3.py — Joint fine-tuning of HybridBlurDM + Diffusion Prior (Stage 3).
 
-Takes the pre-trained Restormer backbone (Stage 1) and Diffusion Prior
-(Stage 2) and fine-tunes them end-to-end at full image quality.
+Loads Stage-1 HybridBlurDM backbone + Stage-2 diffusion prior and fine-tunes
+jointly end-to-end at a low learning rate.
 
-Lower learning rate than Stage 1 (fine-tuning schedule).  All flags from
-NAFNet Stage 3 are supported (--ema, --amp, --criterion, etc.).
+Because HybridBlurDM injects the FiLM prior at EVERY decoder level (not just
+the bottleneck), Stage 3 should yield larger gains than other backbones:
+all four decoder levels can be steered by the learned diffusion prior.
+
+Default criterion l1perceptual combines L1 (pixel fidelity) + VGG perceptual
+(texture sharpness), which is optimal for the final Stage-3 fine-tune.
 """
 
 from __future__ import annotations
@@ -21,10 +25,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
-import tqdm
-from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
@@ -32,14 +33,11 @@ parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(parent_dir)
 
 from MIMO_UNet.models.LatentBlurDM import LatentExposureDiffusion
-from MIMO_UNet.models.losses import CharbonnierLoss, VGGPerceptualLoss, L1andPerceptualLoss
-from Restormer.models.RestormerBlurDM import build_Restormer
-from utils.utils import AverageMeter, calc_psnr, count_parameters, judge_and_remove_module_dict, tensor2cv
-from NAFNet.train_stage1 import WarmupCosineScheduler, ModelEMA, fft_loss, make_dataset, setup_ddp
-from NAFNet.train_stage3 import Trainer   # reuse unchanged trainer
-
+from HybridBlurDM.models.HybridBlurDM import build_HybridBlurDM
+from utils.utils import count_parameters, judge_and_remove_module_dict
+from NAFNet.train_stage1 import WarmupCosineScheduler, make_dataset, setup_ddp
+from NAFNet.train_stage3 import Trainer
 from tensorboardX import SummaryWriter
-import pyiqa
 
 cv2.setNumThreads(0)
 torch.backends.cudnn.benchmark = True
@@ -47,14 +45,16 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 
 def build_deblur_net(model_name: str) -> nn.Module:
-    if model_name.startswith("RestormerBlurDM"):
-        return build_Restormer(model_name)
-    raise ValueError(f"Unknown model '{model_name}' for Restormer train_stage3.")
+    if model_name.startswith("HybridBlurDM"):
+        return build_HybridBlurDM(model_name)
+    raise ValueError(f"Unknown model '{model_name}' for HybridBlurDM train_stage3.")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="BlurDM Stage 3 — Restormer Joint Fine-Tuning")
-    parser.add_argument("--end_epoch",         default=3000,  type=int)
+    parser = argparse.ArgumentParser(
+        description="HybridBlurDM Stage 3 — joint fine-tuning with diffusion prior"
+    )
+    parser.add_argument("--end_epoch",         default=300,   type=int)
     parser.add_argument("--start_epoch",       default=1,     type=int)
     parser.add_argument("--batch_size",        default=8,     type=int)
     parser.add_argument("--crop_size",         default=256,   type=int)
@@ -66,29 +66,34 @@ if __name__ == "__main__":
     parser.add_argument("--fft_weight",        default=0.1,   type=float)
     parser.add_argument("--grad_clip",         default=1.0,   type=float)
     parser.add_argument("--gamma",             default=0.1,   type=float)
+    parser.add_argument("--perc_weight",       default=0.2,   type=float,
+                        help="VGG16 perceptual loss weight for Stage-3 fine-tuning")
     parser.add_argument("--optimizer",         default="adamw", choices=["adam", "adamw"])
     parser.add_argument("--criterion",         default="l1perceptual",
                         choices=["l1", "perceptual", "l1perceptual"])
-    parser.add_argument("--model_name",  default="RestormerBlurDM-light", type=str)
-    parser.add_argument("--model",       default="RestormerBlurDM-light", type=str)
-    parser.add_argument("--data_path",   default="./dataset/GOPRO_Large", type=str)
-    parser.add_argument("--dir_path",    default="./experiments/Restormer/GoPro/stage3", type=str)
+    parser.add_argument("--model_name",        default="HybridBlurDM-light", type=str)
+    parser.add_argument("--model",             default="HybridBlurDM-light", type=str)
+    parser.add_argument("--data_path",         default="./dataset/GOPRO_Large", type=str)
+    parser.add_argument("--dir_path",
+                        default="./experiments/HybridBlurDM/GoPro/stage3", type=str)
     parser.add_argument("--deblur_path", required=True, type=str,
                         help="Path to Stage 1 best_deblur_*.pth")
     parser.add_argument("--dm_path",     required=True, type=str,
                         help="Path to Stage 2 best_dm_*.pth")
-    parser.add_argument("--seed",        default=2023, type=int)
-    parser.add_argument("--val_save_epochs", default=100, type=int)
-    parser.add_argument("--resume",      default=None, type=str)
-    parser.add_argument("--num_workers", default=0 if os.name == "nt" else 8, type=int)
-    parser.add_argument("--local_rank",  default=int(os.getenv("LOCAL_RANK", -1)), type=int)
+    parser.add_argument("--seed",              default=2023,  type=int)
+    parser.add_argument("--val_save_epochs",   default=100,   type=int)
+    parser.add_argument("--resume",            default=None,  type=str)
+    parser.add_argument("--num_workers",
+                        default=0 if os.name == "nt" else 8, type=int)
+    parser.add_argument("--local_rank",
+                        default=int(os.getenv("LOCAL_RANK", -1)), type=int)
     parser.add_argument("--amp", action="store_true")
     parser.add_argument("--ema", action="store_true")
     args = parser.parse_args()
 
     device, args.local_rank = setup_ddp(args.local_rank)
     args.device = device
-    num_gpus = max(torch.cuda.device_count(), 1)
+    num_gpus    = max(torch.cuda.device_count(), 1)
 
     seed = args.seed + args.local_rank
     random.seed(seed); np.random.seed(seed)
@@ -106,12 +111,14 @@ if __name__ == "__main__":
     net_dm.load_state_dict(judge_and_remove_module_dict(s2["model_dm_state"]))
 
     all_params = list(net.parameters()) + list(net_dm.parameters())
-    if args.optimizer == "adamw":
-        optimizer = optim.AdamW(all_params, lr=args.init_lr, weight_decay=1e-4)
-    else:
-        optimizer = optim.Adam(all_params, lr=args.init_lr)
-
-    scheduler = WarmupCosineScheduler(optimizer, args.warmup_epochs, args.end_epoch, args.min_lr)
+    optimizer  = (
+        optim.AdamW(all_params, lr=args.init_lr, weight_decay=1e-4)
+        if args.optimizer == "adamw"
+        else optim.Adam(all_params, lr=args.init_lr)
+    )
+    scheduler  = WarmupCosineScheduler(
+        optimizer, args.warmup_epochs, args.end_epoch, args.min_lr
+    )
 
     ckpt = os.path.join(args.dir_path, f"last_{args.model_name}.pth")
     if os.path.exists(ckpt):
@@ -121,7 +128,7 @@ if __name__ == "__main__":
         net.load_state_dict(   judge_and_remove_module_dict(state["model_state"]))
         net_dm.load_state_dict(judge_and_remove_module_dict(state["model_dm_state"]))
         optimizer.load_state_dict(state["optimizer_state"])
-        if state["scheduler_state"]:
+        if state.get("scheduler_state"):
             scheduler.load_state_dict(state["scheduler_state"])
     elif args.resume:
         st = torch.load(args.resume, map_location=map_loc)

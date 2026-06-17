@@ -472,7 +472,7 @@ if __name__ == "__main__":
     p.add_argument("--gamma",              default=0.1,   type=float)
     p.add_argument("--optimizer",          default="adamw", choices=["adam", "adamw"])
     p.add_argument("--criterion",          default="l1",
-                   choices=["deblur", "l1", "perceptual", "l1perceptual"])
+                   choices=["deblur", "l1", "l2", "perceptual", "l1perceptual"])
     p.add_argument("--model_name",         default="HybridBlurDM-light")
     p.add_argument("--model",              default="HybridBlurDM-light")
     p.add_argument("--data_path",          default="./dataset/GOPRO_Large")
@@ -563,8 +563,9 @@ if __name__ == "__main__":
     else:
         os.makedirs(args.dir_path, exist_ok=True)
 
-    net    = nn.parallel.DistributedDataParallel(net,    device_ids=[args.local_rank])
-    net_le = nn.parallel.DistributedDataParallel(net_le, device_ids=[args.local_rank])
+    if dist.is_initialized():
+        net    = nn.parallel.DistributedDataParallel(net,    device_ids=[args.local_rank])
+        net_le = nn.parallel.DistributedDataParallel(net_le, device_ids=[args.local_rank])
 
     ds_kw = dict(
         jpeg_aug=args.jpeg_aug, noise_aug=args.noise_aug,
@@ -587,7 +588,9 @@ if __name__ == "__main__":
 
     val_set = make_dataset(args.data_path, "test", args.crop_size)
 
-    train_sampler    = DistributedSampler(train_set)
+    _world = dist.get_world_size() if dist.is_initialized() else 1
+    _rank  = dist.get_rank()       if dist.is_initialized() else 0
+    train_sampler    = DistributedSampler(train_set, num_replicas=_world, rank=_rank)
     dataloader_train = make_dataloader(
         train_set, batch_size=args.batch_size // num_gpus,
         sampler=train_sampler, num_workers=args.num_workers,

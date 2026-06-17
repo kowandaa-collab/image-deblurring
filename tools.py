@@ -75,9 +75,9 @@ def cmd_eval(args: argparse.Namespace) -> None:
 
     print(f"\n{'='*40}")
     print(f"  Images evaluated : {len(rows)}")
-    print(f"  PSNR  (↑ better) : {avg_psnr:.4f} dB")
-    print(f"  SSIM  (↑ better) : {avg_ssim:.4f}")
-    print(f"  LPIPS (↓ better) : {avg_lpips:.4f}")
+    print(f"  PSNR  (higher=better) : {avg_psnr:.4f} dB")
+    print(f"  SSIM  (higher=better) : {avg_ssim:.4f}")
+    print(f"  LPIPS (lower=better)  : {avg_lpips:.4f}")
     print(f"{'='*40}\n")
 
     if args.output_csv:

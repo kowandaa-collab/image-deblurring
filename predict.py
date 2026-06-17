@@ -33,8 +33,8 @@ from utils.utils import judge_and_remove_module_dict, count_parameters
 # Per-backbone factory
 # ---------------------------------------------------------------------------
 
-_PAD_FACTOR = {"NAFNet": 8, "Restormer": 8, "MIMO_UNet": 8, "Stripformer": 32}
-_OUT_INDEX  = {"NAFNet": 2, "Restormer": 2, "MIMO_UNet": 2, "Stripformer": None}
+_PAD_FACTOR = {"NAFNet": 8, "Restormer": 8, "MIMO_UNet": 8, "Stripformer": 32, "HybridBlurDM": 8}
+_OUT_INDEX  = {"NAFNet": 2, "Restormer": 2, "MIMO_UNet": 2, "Stripformer": None, "HybridBlurDM": 2}
 
 
 def build_backbone(backbone: str, model_name: str) -> nn.Module:
@@ -50,6 +50,9 @@ def build_backbone(backbone: str, model_name: str) -> nn.Module:
     if backbone == "Stripformer":
         from Stripformer.models.StripformerBlurDM import get_nets
         return get_nets(model_name)
+    if backbone == "HybridBlurDM":
+        from HybridBlurDM.models.HybridBlurDM import build_HybridBlurDM
+        return build_HybridBlurDM(model_name)
     raise ValueError(f"Unknown backbone: {backbone!r}")
 
 
@@ -79,9 +82,13 @@ def _forward(model, dm, blur_p, out_idx):
 
 
 def _tta_forward(model, dm, blur_p, out_idx):
-    out   = _forward(model, dm, blur_p, out_idx)
-    out_f = _forward(model, dm, torch.flip(blur_p, dims=[3]), out_idx)
-    return 0.5 * (out + torch.flip(out_f, dims=[3]))
+    # 4-way TTA: original, h-flip, v-flip, hv-flip — average after un-flipping
+    preds = []
+    for dims in [[], [3], [2], [2, 3]]:
+        x = torch.flip(blur_p, dims=dims) if dims else blur_p
+        p = _forward(model, dm, x, out_idx)
+        preds.append(torch.flip(p, dims=dims) if dims else p)
+    return torch.stack(preds).mean(0)
 
 
 @torch.no_grad()
@@ -158,7 +165,7 @@ def predict(model, dm, args, device):
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description="BlurDM unified inference.")
     p.add_argument("--backbone",    required=True,
-                   choices=["NAFNet", "MIMO_UNet", "Restormer", "Stripformer"])
+                   choices=["NAFNet", "MIMO_UNet", "Restormer", "Stripformer", "HybridBlurDM"])
     p.add_argument("--model_name",  default="NAFNetBlurDM-light")
     p.add_argument("--model_path",  required=True)
     p.add_argument("--dm_path",     required=True)

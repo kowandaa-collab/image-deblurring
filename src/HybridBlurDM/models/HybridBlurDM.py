@@ -582,7 +582,7 @@ class HybridBlurDM(nn.Module):
 # ---------------------------------------------------------------------------
 
 _CONFIGS: dict[str, dict] = {
-    # ~18-22 M backbone params. Mirrors NAFNet's proven [2,2,4,8] depth
+    # ~22 M backbone params. Mirrors NAFNet's proven [2,2,4,8] depth
     # structure but with 3× richer blocks (dual-domain + strip + gated FFN).
     # strip_kernel=21 covers longer GoPro streak lengths vs. the original 11.
     "HybridBlurDM-light": dict(
@@ -592,13 +592,34 @@ _CONFIGS: dict[str, dict] = {
         ffn_expand=2.66,
         strip_kernel=21,
     ),
-    # ~40 M backbone params — higher capacity for Stage-3 fine-tuning.
+    # ~50 M backbone params — 1.5× wider than light, same depth.
+    # strip_kernel=21 kept for weight compatibility with light checkpoints.
     "HybridBlurDM-base": dict(
         width=48,
         enc_blocks=[2, 2, 4, 8],
         dec_blocks=[2, 2, 4, 8],
         ffn_expand=2.66,
         strip_kernel=21,
+    ),
+    # ~57 M backbone params — width=48 + deeper bottleneck (10 blocks vs 8)
+    # + strip_kernel=31 to cover longer motion streaks at 384px training.
+    # Target: 34+ dB on GoPro. Requires full retrain from Stage 1.
+    "HybridBlurDM-full": dict(
+        width=48,
+        enc_blocks=[2, 2, 4, 10],
+        dec_blocks=[2, 2, 4, 10],
+        ffn_expand=2.66,
+        strip_kernel=31,
+    ),
+    # ~88 M backbone params — width=64, same block counts as light.
+    # strip_kernel=31 for 384px crops. Target: 34.5–35 dB on GoPro.
+    # Requires grad_ckpt=True + AMP to fit on a single 24 GB GPU.
+    "HybridBlurDM-xl": dict(
+        width=64,
+        enc_blocks=[2, 2, 4, 8],
+        dec_blocks=[2, 2, 4, 8],
+        ffn_expand=2.66,
+        strip_kernel=31,
     ),
 }
 

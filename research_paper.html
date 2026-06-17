@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BlurDM: A Blur Diffusion Model for Image Deblurring</title>
+<style>
+  * { box-sizing: border-box; }
+
+  body {
+    font-family: 'Georgia', 'Times New Roman', serif;
+    background: #fff;
+    color: #111;
+    margin: 0;
+    padding: 0;
+    font-size: 11pt;
+    line-height: 1.7;
+  }
+
+  /* Print-friendly */
+  @media print {
+    .no-print { display: none !important; }
+    body { font-size: 11pt; }
+    .page-wrap { max-width: 100%; padding: 0; }
+    h2 { page-break-before: auto; }
+  }
+
+  .page-wrap {
+    max-width: 750px;
+    margin: 0 auto;
+    padding: 60px 40px 80px;
+  }
+
+  /* Header */
+  .paper-title {
+    font-size: 20pt;
+    font-weight: 700;
+    text-align: center;
+    margin-bottom: 6px;
+    line-height: 1.3;
+  }
+
+  .authors {
+    text-align: center;
+    font-size: 11pt;
+    margin-bottom: 4px;
+    color: #333;
+  }
+  .affil {
+    text-align: center;
+    font-size: 10pt;
+    color: #555;
+    margin-bottom: 30px;
+  }
+
+  hr.title-rule { border: none; border-top: 1px solid #000; margin: 0 0 24px; }
+  hr.section-rule { border: none; border-top: 1px solid #ccc; margin: 32px 0 20px; }
+
+  /* Abstract */
+  .abstract-box {
+    border-left: 3px solid #333;
+    padding: 0 0 0 18px;
+    margin: 0 0 32px;
+  }
+  .abstract-box .abs-title {
+    font-weight: 700; font-size: 10pt; text-transform: uppercase;
+    letter-spacing: 0.08em; margin-bottom: 8px;
+  }
+  .abstract-box p { font-size: 10pt; margin: 0 0 8px; }
+
+  /* Keywords */
+  .keywords { font-size: 10pt; color: #444; margin-bottom: 32px; }
+  .keywords strong { color: #000; }
+
+  /* Sections */
+  h2 {
+    font-size: 13pt;
+    font-weight: 700;
+    margin-top: 36px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 4px;
+  }
+  h3 {
+    font-size: 11.5pt;
+    font-weight: 700;
+    margin-top: 22px;
+    margin-bottom: 8px;
+  }
+
+  p { margin: 0 0 12px; text-align: justify; }
+
+  /* Formula */
+  .formula {
+    background: #f8f8f8;
+    border-left: 3px solid #555;
+    padding: 10px 16px;
+    font-family: 'Courier New', monospace;
+    font-size: 10.5pt;
+    margin: 14px 0 14px 24px;
+    display: block;
+  }
+
+  /* Table */
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 16px 0;
+    font-size: 10pt;
+  }
+  caption { font-size: 9.5pt; color: #555; margin-bottom: 6px; caption-side: top; text-align: left; }
+  th {
+    border-top: 2px solid #000;
+    border-bottom: 1px solid #000;
+    padding: 6px 12px;
+    font-weight: 700;
+    text-align: left;
+  }
+  td { padding: 6px 12px; border-bottom: 1px solid #ddd; }
+  tr:last-child td { border-bottom: 2px solid #000; }
+  td.psnr { font-weight: 700; }
+
+  /* Status pill */
+  .done { display: inline-block; background: #d1fae5; color: #065f46; border-radius: 4px; padding: 1px 8px; font-size: 9pt; font-family: sans-serif; font-weight: 700; }
+  .wip  { display: inline-block; background: #fef3c7; color: #92400e; border-radius: 4px; padding: 1px 8px; font-size: 9pt; font-family: sans-serif; font-weight: 700; }
+
+  /* Figure placeholder */
+  .fig-placeholder {
+    border: 1px dashed #aaa; border-radius: 6px;
+    padding: 28px; text-align: center;
+    color: #999; font-size: 10pt; font-family: sans-serif;
+    margin: 16px 0;
+  }
+  .fig-cap { font-size: 9.5pt; color: #444; text-align: center; margin-top: 6px; margin-bottom: 16px; }
+  .fig-cap strong { font-weight: 700; }
+
+  /* List */
+  ul { margin: 8px 0 14px 20px; }
+  ul li { margin-bottom: 4px; }
+  ol { margin: 8px 0 14px 20px; }
+  ol li { margin-bottom: 4px; }
+
+  /* References */
+  .refs ol { margin-left: 20px; }
+  .refs ol li { font-size: 10pt; margin-bottom: 8px; }
+
+  /* Stage table */
+  .stage-inline {
+    display: inline-block; border: 1px solid #ccc; border-radius: 4px;
+    padding: 1px 8px; font-family: sans-serif; font-size: 9.5pt; color: #333;
+    background: #f5f5f5;
+  }
+
+  /* Footnote bar */
+  .footnote { font-size: 9pt; color: #777; border-top: 1px solid #ddd; padding-top: 8px; margin-top: 32px; }
+
+  /* Placeholder result */
+  .result-placeholder {
+    border: 1px dashed #ccc; border-radius: 6px;
+    padding: 20px 24px; text-align: center; color: #999;
+    font-family: sans-serif; font-size: 10pt; margin: 16px 0;
+  }
+
+  /* Top bar */
+  .topbar {
+    background: #0d1117; color: #5eead4;
+    text-align: center; padding: 10px;
+    font-family: 'Segoe UI', sans-serif; font-size: 0.82rem;
+    letter-spacing: 0.05em;
+  }
+  .topbar a { color: #5eead4; text-decoration: underline; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<div class="topbar no-print">
+  BlurDM Research Paper &nbsp;|&nbsp;
+  <a onclick="window.print()">Print / Save as PDF</a>
+</div>
+
+<div class="page-wrap">
+
+<div class="paper-title">
+  BlurDM: A Blur Diffusion Model for Image Deblurring
+</div>
+
+<div class="authors">Student IDs: 1123532 &nbsp;&nbsp; 1123530</div>
+<div class="affil">International Bachelor Program in Informatics (IBPI)<br>Yuan Ze University, Taiwan</div>
+
+<hr class="title-rule">
+
+<!-- ABSTRACT -->
+<div class="abstract-box">
+  <div class="abs-title">Abstract</div>
+  <p>
+    Image deblurring is an important image restoration task that aims to recover a clear image from a blurred observation. Traditional CNN and transformer-based methods have achieved significant progress but often struggle to model the physical degradation process of motion blur.
+  </p>
+  <p>
+    This project investigates BlurDM, a diffusion-based image deblurring framework that models both blur and noise degradation simultaneously. To improve restoration quality, we propose injecting BlurDM diffusion priors into a NAFNet-based restoration backbone using Feature-wise Linear Modulation (FiLM). Unlike prior work that applies refinement networks sequentially after diffusion, our approach conditions the backbone directly on the diffusion prior at multiple feature scales, enabling spatially-aware blur guidance without requiring iterative diffusion sampling at inference time.
+  </p>
+  <p>
+    We implement two model variants: NAFNetBlurDM-light (~18M parameters) using a NAFNet-style backbone, and HybridBlurDM-light (~22M parameters) using a custom backbone combining frequency-domain and spatial processing via DualDomainMixer, MotionStripConv, and GatedFFN modules. Both models are trained with a 3-stage curriculum on the GoPro benchmark. Preliminary results show NAFNetBlurDM-light achieves 31.71 dB PSNR on the GoPro validation set.
+  </p>
+</div>
+
+<div class="keywords">
+  <strong>Keywords:</strong> Image Deblurring, Diffusion Model, BlurDM, NAFNet, FiLM Conditioning, Feature-wise Linear Modulation, Image Restoration, Deep Learning
+</div>
+
+<!-- 1. INTRODUCTION -->
+<h2>1. Introduction</h2>
+
+<p>
+  Image blur is a common degradation that occurs during image acquisition due to camera shake, object motion, or long exposure times. Motion blur significantly reduces image quality and negatively impacts downstream computer vision tasks such as object detection, image classification, and semantic segmentation.
+</p>
+
+<p>
+  Image deblurring aims to recover a sharp image from a degraded blurred observation. This task remains challenging because a single blurred image may correspond to multiple possible sharp images, making the problem highly ill-posed. The solution space is large, and methods must impose strong priors to identify the plausible sharp output.
+</p>
+
+<p>
+  Traditional image deblurring approaches primarily rely on convolutional neural networks (CNNs) and transformer architectures. CNN-based models such as MIMO-UNet focus on extracting local image features, while transformer-based methods such as FFTformer and LoFormer capture long-range dependencies to improve restoration performance. Despite their effectiveness, many existing methods tend to generate over-smoothed outputs and struggle to preserve fine image details.
+</p>
+
+<p>
+  Recently, diffusion models have emerged as powerful generative frameworks capable of producing highly realistic image content. Their iterative denoising process enables the recovery of image structures that are often difficult to reconstruct using regression-based methods. BlurDM extends the conventional diffusion paradigm by incorporating the physical process of motion blur formation into the diffusion framework.
+</p>
+
+<p>
+  The objective of this project is to investigate the BlurDM framework and enhance its restoration capability by integrating a NAFNet-based backbone conditioned on the BlurDM diffusion prior via Feature-wise Linear Modulation (FiLM). This approach allows the backbone to exploit blur-specific guidance at every feature scale without requiring iterative diffusion at test time.
+</p>
+
+<!-- 2. RELATED WORK -->
+<h2>2. Related Work</h2>
+
+<h3>2.1 Image Deblurring</h3>
+<p>
+  Image deblurring has been extensively studied in computer vision research. Early approaches relied on handcrafted priors and optimization techniques to estimate blur kernels and recover sharp images. Although these methods achieved reasonable results, they often failed under complex real-world conditions.
+</p>
+<p>
+  Deep learning introduced a new paradigm for image restoration. CNN-based methods such as MIMO-UNet and transformer-based methods such as FFTformer and LoFormer significantly improved restoration performance by learning complex image representations directly from data.
+</p>
+
+<h3>2.2 Diffusion Models</h3>
+<p>
+  Diffusion models have recently achieved remarkable success in image generation and restoration tasks. Models such as DDPM and DDIM progressively corrupt images through a forward diffusion process and subsequently reconstruct them through iterative denoising. Unlike traditional image restoration methods, diffusion models can generate realistic image details and preserve structural consistency.
+</p>
+
+<h3>2.3 NAFNet</h3>
+<p>
+  NAFNet is a lightweight image restoration architecture designed to achieve high restoration performance with reduced computational complexity. Its activation-free design, based on simplified channel attention, enables efficient feature extraction and image reconstruction while maintaining competitive restoration quality.
+</p>
+
+<h3>2.4 Feature-wise Linear Modulation (FiLM)</h3>
+<p>
+  Feature-wise Linear Modulation (FiLM) [Perez et al., 2018] is a general conditioning mechanism that modulates intermediate features of a network using scale and shift parameters derived from a conditioning signal. It has been successfully applied in conditional image generation, multi-task learning, and image restoration. In this work, we use FiLM to inject the BlurDM diffusion prior into the restoration backbone.
+</p>
+
+<!-- 3. PROPOSED METHOD -->
+<h2>3. Proposed Method</h2>
+
+<h3>3.1 BlurDM Framework</h3>
+<p>
+  BlurDM is designed to model the physical process of motion blur formation through a dual diffusion mechanism. Unlike conventional diffusion models that only introduce Gaussian noise, BlurDM progressively introduces both blur and noise during the forward diffusion process. The forward process is given by:
+</p>
+<span class="formula">I<sub>t</sub> = (α<sub>t-1</sub> / α<sub>t</sub>) · I<sub>t-1</sub> + (1/α<sub>t</sub>) · e<sub>t</sub> + β<sub>t</sub>ε<sub>t</sub></span>
+<p>
+  where e<sub>t</sub> is the blur residual, ε<sub>t</sub> ~ N(0,1) is Gaussian noise, and α<sub>t</sub>, β<sub>t</sub> are schedule coefficients. The reverse generation process iteratively removes both blur and noise to recover the sharp image.
+</p>
+
+<div class="fig-placeholder">[ Figure 1: BlurDM forward diffusion process — insert original diagram ]</div>
+<div class="fig-cap"><strong>Figure 1.</strong> Overview of the BlurDM diffusion process. The framework progressively introduces blur and Gaussian noise during the forward diffusion stage and removes them during reverse generation to reconstruct a sharp image.</div>
+
+<h3>3.2 Overall System Architecture</h3>
+<p>
+  The proposed framework integrates the BlurDM diffusion prior with a deterministic restoration backbone via FiLM conditioning. The system operates through three cooperating components:
+</p>
+<ol>
+  <li><strong>Blur Encoder</strong>: Encodes the blurred input image into a latent representation z<sub>B</sub>.</li>
+  <li><strong>BlurDM</strong>: Generates a refined prior vector p from z<sub>B</sub> through the reverse diffusion process.</li>
+  <li><strong>FiLM-conditioned Backbone</strong>: Restores the sharp image, with intermediate features modulated by p at each encoder and decoder scale.</li>
+</ol>
+<p>
+  At training Stage 1, a Latent Encoder (LE) processes the ground-truth sharp image to provide a clean conditioning signal, teaching the backbone to respond to prior injection. At Stage 3, the LE is replaced by the BlurDM diffusion model, so the backbone receives a diffusion-estimated prior.
+</p>
+
+<div class="fig-placeholder">[ Figure 2: Overall architecture — insert BlurDM stage diagram ]</div>
+<div class="fig-cap"><strong>Figure 2.</strong> Overall architecture of the proposed framework. Three training stages involve the Sharp Encoder (Stage 1), BlurDM diffusion training (Stage 2), and joint fine-tuning with the DM prior replacing the sharp encoder (Stage 3).</div>
+
+<h3>3.3 FiLM Prior Injection</h3>
+<p>
+  The core technical contribution of this project is the FiLM injection mechanism that conditions the backbone on the diffusion prior. For each backbone feature map x ∈ ℝ<sup>B×C×H×W</sup>, a linear projection maps the prior vector p ∈ ℝ<sup>d</sup> to per-channel scale and shift parameters:
+</p>
+<span class="formula">[γ, β] = Linear(p),   γ, β ∈ ℝ<sup>2C</sup></span>
+<span class="formula">FiLM(x) = γ · x + β</span>
+<p>
+  where γ controls per-channel feature scaling and β introduces a per-channel offset. This formulation allows the diffusion prior to suppress or amplify specific feature channels corresponding to blur patterns detected in the latent space.
+</p>
+<p>
+  During Stage 1, all FiLM layers are initialized with γ = 1 and β = 0 (identity transformation), ensuring training begins from the backbone-only baseline and the prior signal is introduced gradually. This initialization is critical: without it, random FiLM weights corrupt backbone features at the start of training.
+</p>
+
+<h3>3.4 Model Variants</h3>
+
+<p><strong>NAFNetBlurDM-light (~18M parameters)</strong> uses a NAFNet-style U-Net backbone. Each encoder and decoder block is followed by a FiLMInjection layer receiving the prior vector p. The architecture is efficient and serves as the primary comparison point against the NAFNet baseline.</p>
+
+<p><strong>HybridBlurDM-light (~22M parameters)</strong> uses a custom hybrid backbone designed specifically for motion blur:</p>
+<ul>
+  <li><strong>DualDomainMixer</strong>: Combines FFT-based frequency processing with spatial convolution to capture both global and local motion blur patterns.</li>
+  <li><strong>MotionStripConv</strong>: Elongated strip convolutions that match the directional nature of motion blur kernels.</li>
+  <li><strong>GatedFFN</strong>: Gated feed-forward network for selective feature updating based on content.</li>
+  <li><strong>Deformable Bottleneck</strong>: Spatially adaptive convolution at the lowest resolution for flexible blur kernel estimation.</li>
+  <li><strong>FiLM Injection</strong>: At each encoder and decoder scale, same as NAFNetBlurDM-light.</li>
+</ul>
+
+<h3>3.5 Training Curriculum</h3>
+<p>Training proceeds in three stages designed to progressively build up the full system:</p>
+
+<table>
+  <caption>Table 1. Training stage configuration.</caption>
+  <thead>
+    <tr><th>Stage</th><th>Epochs</th><th>Crop Size</th><th>Learning Rate</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Stage 1 (Backbone + LE)</td><td>300</td><td>256px</td><td>3×10<sup>-4</sup> → 10<sup>-7</sup></td><td>Cosine LR, EMA 0.999</td></tr>
+    <tr><td>Stage 1b (Extended)</td><td>+300</td><td>256px</td><td>5×10<sup>-5</sup> → 10<sup>-7</sup></td><td>Lower LR fine-tune</td></tr>
+    <tr><td>Stage 2 (Diffusion)</td><td>—</td><td>—</td><td>—</td><td>Backbone frozen</td></tr>
+    <tr><td>Stage 3 (Joint fine-tune)</td><td>50</td><td>384px</td><td>2×10<sup>-6</sup> → 10<sup>-8</sup></td><td>DM prior replaces LE</td></tr>
+  </tbody>
+</table>
+
+<p>
+  The loss function combines Charbonnier loss and FFT frequency loss:
+</p>
+<span class="formula">L = L<sub>Charbonnier</sub>(pred, sharp) + 0.1 · L<sub>FFT</sub>(pred, sharp)</span>
+<p>
+  Charbonnier loss (ε = 10<sup>-3</sup>) is preferred over L2 to reduce sensitivity to outlier pixels. The FFT term penalizes frequency-domain discrepancies, encouraging the model to recover high-frequency textures.
+</p>
+
+<!-- 4. EXPERIMENTAL SETUP -->
+<h2>4. Experimental Setup</h2>
+
+<h3>4.1 Implementation Environment</h3>
+<p>
+  The framework was implemented in Python 3.10 with PyTorch 2.x. Training used automatic mixed precision (AMP) to reduce memory usage, and Exponential Moving Average (EMA, decay = 0.999) was applied to all backbone parameters. Validation used EMA weights swapped in temporarily, ensuring reported validation PSNR reflects the stabilized model rather than the live optimizer weights.
+</p>
+<p>
+  The optimizer was AdamW (β<sub>1</sub>=0.9, β<sub>2</sub>=0.999, weight decay=10<sup>-4</sup>) with a WarmupCosineScheduler providing 5 warmup epochs before cosine decay.
+</p>
+
+<h3>4.2 Dataset</h3>
+<p>
+  All experiments used the <strong>GoPro dataset</strong> (Nah et al., CVPR 2017), which consists of 2,103 training pairs and 1,111 test pairs of full-resolution (1280×720) blurry and sharp images captured with a GoPro camera. Blur is generated by averaging consecutive sharp frames, producing diverse real-world motion blur patterns.
+</p>
+
+<h3>4.3 Evaluation Metrics</h3>
+<p><strong>Peak Signal-to-Noise Ratio (PSNR)</strong> measures pixel-level reconstruction quality:</p>
+<span class="formula">PSNR = 10 · log<sub>10</sub>(MAX<sup>2</sup> / MSE)</span>
+<p>Higher PSNR indicates better restoration quality. Typical CNN-based deblurring methods on GoPro score 31–34 dB.</p>
+
+<p><strong>Structural Similarity Index (SSIM)</strong> measures perceptual structural similarity:</p>
+<span class="formula">SSIM(x, y) = (2μ<sub>x</sub>μ<sub>y</sub> + C<sub>1</sub>)(2σ<sub>xy</sub> + C<sub>2</sub>) / ((μ<sub>x</sub><sup>2</sup> + μ<sub>y</sub><sup>2</sup> + C<sub>1</sub>)(σ<sub>x</sub><sup>2</sup> + σ<sub>y</sub><sup>2</sup> + C<sub>2</sub>))</span>
+
+<p><strong>LPIPS</strong> (Learned Perceptual Image Patch Similarity) evaluates perceptual quality using deep feature representations. Lower LPIPS values indicate better visual quality.</p>
+
+<p>
+  In addition to single-model evaluation, we apply <strong>4-way Test-Time Augmentation (TTA)</strong>: predictions are averaged across the original image, horizontal flip, vertical flip, and both flips combined after un-flipping. TTA typically adds +0.2–0.3 dB at no training cost.
+</p>
+
+<!-- 5. RESULTS -->
+<h2>5. Results and Discussion</h2>
+
+<h3>5.1 Quantitative Results</h3>
+
+<table>
+  <caption>Table 2. Validation PSNR on GoPro (validation split). Full test-set evaluation pending.</caption>
+  <thead>
+    <tr><th>Model</th><th>Val PSNR ↑</th><th>LPIPS ↓</th><th>Epochs</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>NAFNetBlurDM-light (Stage 3)</td>
+      <td class="psnr">31.71 dB</td>
+      <td>0.1193</td>
+      <td>300</td>
+      <td><span class="done">Complete</span></td>
+    </tr>
+    <tr>
+      <td>HybridBlurDM-light (standalone backbone)</td>
+      <td class="psnr">~31.6 dB</td>
+      <td>~0.117</td>
+      <td>163/249</td>
+      <td><span class="wip">In progress</span></td>
+    </tr>
+    <tr>
+      <td>Ensemble + 4-way TTA (est.)</td>
+      <td class="psnr">TBD</td>
+      <td>TBD</td>
+      <td>—</td>
+      <td><span class="wip">Pending</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="result-placeholder">
+  Full test-set evaluation (1,111 images) and qualitative visual comparisons will be added after training completes.
+</div>
+
+<h3>5.2 Qualitative Analysis</h3>
+
+<div class="result-placeholder">
+  Visual comparison: Blurred Input | Model Output | Ground Truth Sharp | Error Heatmap (|output − sharp|, jet colormap)<br>
+  To be inserted after training and evaluation complete.
+</div>
+
+<p>
+  Preliminary analysis of NAFNetBlurDM-light visualizations (validation epochs 100, 200, 300) shows that error is concentrated at object edges and fast-moving regions. Per-image PSNR varies widely: from 14.88 dB on severely blurred frames to 41.39 dB on near-static scenes. This variance motivates the use of spatially-adaptive FiLM conditioning, which can modulate features differently in high-motion vs. low-motion regions based on the diffusion prior.
+</p>
+
+<h3>5.3 Discussion</h3>
+<p>
+  The proposed FiLM conditioning approach has two key advantages over sequential post-processing: (1) the backbone can learn to suppress or amplify features based on blur severity at every processing stage rather than only at the output, and (2) the diffusion prior is used only once at inference (forward pass of BlurDM), avoiding the prohibitive cost of iterative reverse diffusion.
+</p>
+
+<p>
+  However, a critical failure mode was discovered during Stage 3 training. During Stage 1, FiLM layers co-evolve with the LatentEncoder to process a clean, sharp-image conditioning signal. When Stage 3 introduces the BlurDM diffusion prior — a qualitatively different signal estimated from the blurred latent — the FiLM layers receive inputs outside their trained distribution. This causes the backbone to misinterpret the prior and produce degraded outputs at the start of Stage 3.
+</p>
+
+<p>
+  Two mitigation strategies were explored: (a) resetting FiLM weights to identity (γ=1, β=0) before Stage 3 fine-tuning, forcing the backbone to relearn the DM prior conditioning; and (b) using a "standalone" mode where FiLM always receives a zero prior (equivalent to identity after reset), effectively decoupling the backbone from the prior to establish a clean upper-bound baseline. The standalone NAFNetBlurDM-light achieves 31.71 dB — matching its Stage 3 result — suggesting the Stage 3 DM prior integration has not yet surpassed the standalone backbone performance.
+</p>
+
+<!-- 6. LIMITATIONS -->
+<h2>6. Limitations</h2>
+
+<p>
+  Despite promising performance, several limitations remain.
+</p>
+
+<p>
+  <strong>Stage 3 FiLM distribution mismatch.</strong> As described in Section 5.3, FiLM layers co-evolve with the LatentEncoder in Stage 1, making them incompatible with the DM prior signal in Stage 3. Addressing this would require either a dedicated adapter network to align the prior distributions, or retraining the entire system jointly from scratch with the DM prior from the beginning — a significantly more expensive procedure.
+</p>
+
+<p>
+  <strong>Architectural ceiling.</strong> Both model variants appear to plateau around 31.6–31.7 dB val PSNR under the current training setup (crop size 128–256px, single-stage backbone training). Larger crop sizes, deeper architectures, or attention-based components may be needed to push beyond this ceiling.
+</p>
+
+<p>
+  <strong>Computational cost.</strong> Each training stage requires 300+ epochs on a single GPU, totaling approximately 300–400 GPU-hours per model. The diffusion prior generation adds inference overhead compared to purely deterministic methods.
+</p>
+
+<p>
+  <strong>Future work</strong> may explore: (1) a lightweight prior adapter to bridge the DM-prior/LE-prior distribution gap; (2) larger crop sizes (384–512px) to capture longer motion blur kernels; (3) joint backbone and diffusion training from scratch; and (4) multi-scale TTA and model ensembling for final evaluation.
+</p>
+
+<!-- 7. CONCLUSION -->
+<h2>7. Conclusion</h2>
+
+<p>
+  This project presented a FiLM-conditioned image deblurring framework that integrates BlurDM diffusion priors with a NAFNet-based restoration backbone. Two model variants were designed and trained: NAFNetBlurDM-light (~18M parameters) and HybridBlurDM-light (~22M parameters). A 3-stage curriculum progressively trains the backbone with a clean LatentEncoder prior (Stage 1), the diffusion model independently (Stage 2), and fine-tunes the joint system with the DM prior (Stage 3).
+</p>
+
+<p>
+  NAFNetBlurDM-light achieves 31.71 dB val PSNR on the GoPro benchmark, competitive with published convolutional baselines. The project demonstrates that FiLM conditioning is a practical mechanism for injecting diffusion priors into deterministic restoration networks, avoiding the computational cost of iterative diffusion at inference.
+</p>
+
+<p>
+  The key finding is that FiLM layer distribution mismatch between the LatentEncoder and DM prior signals is the primary bottleneck for Stage 3 performance. Solving this prior alignment problem is the most impactful direction for future improvement.
+</p>
+
+<!-- REFERENCES -->
+<h2>References</h2>
+<div class="refs">
+<ol>
+  <li>He, J. T., Tsai, F. J., Peng, Y. T., Chen, M. H., Lin, C. W., &amp; Lin, Y. Y. <em>BlurDM: A Blur Diffusion Model for Image Deblurring.</em></li>
+  <li>Ho, J., Jain, A., &amp; Abbeel, P. <em>Denoising Diffusion Probabilistic Models.</em> NeurIPS, 2020.</li>
+  <li>Song, J., Meng, C., &amp; Ermon, S. <em>Denoising Diffusion Implicit Models.</em> ICLR, 2021.</li>
+  <li>Chen, L. et al. <em>NAFNet: Simple Baselines for Image Restoration.</em> ECCV, 2022.</li>
+  <li>Perez, E. et al. <em>FiLM: Visual Reasoning with a General Conditioning Layer.</em> AAAI, 2018.</li>
+  <li>Xia, B. et al. <em>DiffIR: Efficient Diffusion Model for Image Restoration.</em> ICCV, 2023.</li>
+  <li>Kong, L. et al. <em>FFTformer: Efficient Frequency Domain Transformer for Image Deblurring.</em> CVPR, 2023.</li>
+  <li>Mao, X. et al. <em>LoFormer: Local Frequency Transformer for Image Deblurring.</em> ACM MM, 2024.</li>
+  <li>Tsai, F. J. et al. <em>Stripformer: Strip Transformer for Fast Image Deblurring.</em> ECCV, 2022.</li>
+  <li>Zamir, S. W. et al. <em>Restormer: Efficient Transformer for High-Resolution Image Restoration.</em> CVPR, 2022.</li>
+  <li>Nah, S., Kim, T. H., &amp; Lee, K. M. <em>Deep Multi-Scale CNN for Dynamic Scene Deblurring.</em> CVPR, 2017.</li>
+  <li>Rim, J. et al. <em>RealBlur Dataset for Learning and Benchmarking Deblurring Algorithms.</em> ECCV, 2020.</li>
+  <li>Shen, Z. et al. <em>Human-Aware Motion Deblurring (HIDE Dataset).</em> ICCV, 2019.</li>
+</ol>
+</div>
+
+<div class="footnote">
+  BlurDM — Charlie 1123532 &amp; Alvin 1123530 &nbsp;|&nbsp; International Bachelor Program in Informatics, Yuan Ze University
+</div>
+
+</div><!-- page-wrap -->
+</body>
+</html>

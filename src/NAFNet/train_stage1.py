@@ -53,7 +53,10 @@ from MIMO_UNet.models.losses import (
     DeblurLoss, CharbonnierLoss, VGGPerceptualLoss, L1andPerceptualLoss,
 )
 from NAFNet.models.NAFNetBlurDM import build_NAFNet
-from Restormer.models.RestormerBlurDM import build_Restormer
+try:
+    from Restormer.models.RestormerBlurDM import build_Restormer
+except ModuleNotFoundError:
+    build_Restormer = None
 from utils.utils import (
     AverageMeter, batch_psnr, count_parameters,
     judge_and_remove_module_dict, tensor2cv,
@@ -143,12 +146,7 @@ def setup_ddp(local_rank: int):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         if device.type == "cuda":
             torch.cuda.set_device(0)
-        if not dist.is_initialized():
-            dist.init_process_group(
-                backend="gloo",
-                init_method=f"tcp://127.0.0.1:{os.getenv('MASTER_PORT', '29500')}",
-                rank=0, world_size=1,
-            )
+        # Single-GPU: skip dist init — DDP guards (dist.get_world_size() > 1) handle this.
     return device, local_rank
 
 
@@ -203,6 +201,8 @@ def build_criterion(args) -> nn.Module:
                           use_edge=True, use_ssim=True, use_focal_freq=True)
     if args.criterion == "l1":
         return CharbonnierLoss()
+    if args.criterion == "l2":
+        return nn.MSELoss()
     if args.criterion == "perceptual":
         return VGGPerceptualLoss()
     if args.criterion == "l1perceptual":

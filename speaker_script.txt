@@ -73,20 +73,28 @@ prior and fine-tune everything end-to-end at higher 384px crop resolution — th
 where the model learns to use a real diffusion prior at inference time.
 
 
-SLIDE 7 — Proposed Method (FiLM + Two Variants)
+SLIDE 7 — Proposed Modification (FiLM Pipeline)
 ------------------------------------------------
-FiLM conditioning is mathematically simple: output = gamma × feature map + beta.
-Gamma and beta are predicted from the prior vector p through a single linear layer.
-A key initialization: gamma=1, beta=0 at the start so FiLM begins as an identity
-operation — the backbone learns clean deblurring first, and prior conditioning
-activates gradually as training proceeds.
+This slide shows the full inference pipeline of our proposed modification. Starting
+from the blurred input, we pass it through a Blur Encoder to extract a compact latent
+code zB. That code is fed into BlurDM to produce a single prior vector p — capturing
+the global blur context of the image in one compact representation.
 
-We designed two variants:
-  - NAFNetBlurDM-light (~18M params): standard NAFBlocks with FiLM at each U-Net scale
-  - HybridBlurDM-light (~22M params): replaces each encoder block with our custom
-    DualDomainMixer, which processes features in both spatial and frequency domains
-    simultaneously via FFT, plus MotionStripConv for direction-aware motion blur
-    handling, a GatedFFN, and a deformable attention bottleneck.
+That prior vector p drives our FiLM conditioning. The formula on the slide says:
+FiLM(x) = gamma times x plus beta, where gamma and beta are both predicted from p
+through a single linear layer. This means the prior scales and shifts every feature
+map in the decoder at each resolution scale — four injection points total. The
+backbone features are not replaced, just modulated by the prior.
+
+There are three key motivations for this design. First, FiLM injects global blur
+context without replacing any backbone computation — the backbone still does the heavy
+lifting, the prior just steers it in the right direction. Second, there are no
+iterative diffusion steps at inference — we extract p once and run a single forward
+pass, which makes it fast compared to running full reverse diffusion. Third, our
+HybridBlurDM extension adds frequency-domain processing on top of this — the
+DualDomainMixer processes features in both spatial and FFT domains simultaneously,
+which is better suited to motion blur because blur has a strong frequency signature
+that spatial convolutions alone can miss.
 
 
 SLIDE 8 — Dataset & Experimental Setup

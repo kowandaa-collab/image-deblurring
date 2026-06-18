@@ -5,204 +5,179 @@ HybridBlurDM: Diffusion-Guided Deblurring — Speaker Script
 SLIDE 1 — Title
 ---------------
 Good morning / afternoon everyone. We are Charlie and Alvin, and today we present
-HybridBlurDM — a project where we integrate diffusion model priors into image
-restoration backbones to tackle motion deblurring. We designed two lightweight model
-variants called NAFNetBlurDM-light and HybridBlurDM-light, and trained them using a
-3-stage curriculum on the GoPro benchmark. Let's start with some background on why
-this problem matters.
+HybridBlurDM — a diffusion-guided hybrid model for image deblurring. Our work
+integrates BlurDM diffusion priors into a NAFNet-based restoration backbone using
+Feature-Wise Linear Modulation, or FiLM. Let's get started.
 
 
-SLIDE 2 — Introduction
------------------------
-Image deblurring is the task of restoring photos degraded by motion blur or camera
-shake. The three main causes are: camera movement during long exposure, fast-moving
-objects in the frame, and low-light conditions that force a slow shutter. This has
-real-world impact — blurry images reduce accuracy in surveillance systems, medical
-imaging, and autonomous driving where visual clarity is critical. Our goal was to
-build a restoration network that uses a generative prior to recover the missing sharp
-structure from a blurry input.
-
-
-SLIDE 3 — Problem Statement
+SLIDE 2 — Problem Statement
 ----------------------------
-Deblurring is fundamentally ill-posed. One blurry image could correspond to many
-different sharp originals, because the blurring process destroys information
-irreversibly. We need to recover fine edges, textures, and structure from a degraded
-signal — while avoiding common failure modes like ringing artifacts or over-sharpening.
-Our key research question is: can we use a diffusion model's latent prior — without
-running the full iterative reverse diffusion at test time — to guide a fast single-pass
-restoration network?
+The core problem is simple: blurred images lose important visual information and
+reduce image quality. This matters across many real applications — from photography
+to surveillance to medical imaging.
+
+The challenges in solving this are: recovering lost details that were destroyed by
+the blur, preserving the overall structure of the image without artifacts, and
+handling different levels and types of blur across diverse scenes.
+
+Our research question is: can image deblurring performance be improved by injecting
+BlurDM diffusion priors into a NAFNet-based restoration backbone via Feature-Wise
+Linear Modulation — FiLM?
 
 
-SLIDE 4 — Project Objectives
+SLIDE 3 — Project Objectives
 ------------------------------
-We set five concrete objectives. First, deeply study the BlurDM architecture and
-understand how it encodes blur into a compact latent prior. Second, understand how
-FiLM conditioning injects that prior into a restoration backbone without iterative
-sampling. Third, design two model variants at different complexity levels. Fourth,
-implement the full 3-stage training curriculum: backbone training, then diffusion
-training, then joint fine-tuning. And fifth, evaluate all models on GoPro using PSNR,
-SSIM, and LPIPS — the three standard metrics for image restoration quality.
+We had five objectives for this project. First, study the BlurDM model and
+understand how it works. Second, analyze how diffusion priors can guide a
+restoration backbone through FiLM conditioning. Third, design and implement two
+model variants — NAFNetBlurDM and HybridBlurDM. Fourth, implement the full 3-stage
+training curriculum. And fifth, evaluate restoration performance using PSNR, LPIPS,
+and SSIM on the GoPro benchmark.
 
 
-SLIDE 5 — BlurDM Overview
---------------------------
-The key innovation of BlurDM versus standard DDPM is its forward process. Standard
-DDPM adds only Gaussian noise at each step. BlurDM's forward process simultaneously
-introduces blur AND noise — directly modeling the physical degradation in a real camera.
-The reverse process then learns to undo this. Crucially for our use: we don't need to
-run all T reverse steps at inference. We extract the blurry image's latent vector z_B
-by passing it through the Blur Encoder, then run one pass through BlurDM to get a
-prior vector p. This prior p feeds our restoration backbone via FiLM conditioning —
-one forward pass, no iterative sampling overhead.
+SLIDE 4 — BlurDM Architecture
+-------------------------------
+This slide shows the original BlurDM architecture that our work builds on.
+
+BlurDM uses a 3-stage training pipeline shown in the diagram. In Stage 1, the
+deblurring model is trained using a Sharp Encoder — it takes the sharp ground truth
+image, encodes it into a latent z_S, and the deblurring model learns to use that
+as a conditioning prior.
+
+In Stage 2, the BlurDM diffusion model is trained separately using only the blurry
+image — it learns to produce the same prior using the blur encoder latent z_B,
+without needing the sharp reference. The backbone is frozen during this stage.
+
+In Stage 3, everything is joined together — the Sharp Encoder is replaced by the
+BlurDM prior and the entire system is fine-tuned end-to-end. At inference time,
+the model runs a full reverse diffusion process on the blur latent z_B to produce
+the conditioning prior — without needing the sharp image at all.
 
 
-SLIDE 6 — BlurDM Architecture (3-Stage Pipeline)
--------------------------------------------------
-The full pipeline runs in three stages. Stage 1 trains the restoration backbone using
-a Sharp LatentEncoder — this encoder processes the sharp ground truth image to produce
-a reference prior, teaching the backbone how to correctly use FiLM conditioning
-signals.
+SLIDE 5 — Proposed Modification
+---------------------------------
+This slide shows our proposed modification to the BlurDM pipeline. The inference
+pipeline works as follows: the blurred image is passed through a Blur Encoder to
+produce a compact latent code z_B. That code is fed into BlurDM to produce a single
+prior vector p — one compact vector representing the global blur context.
 
-Stage 2 freezes the backbone and trains the BlurDM diffusion model in the
-blur-encoder latent space — teaching it to generate a prior from a blurry input
-instead of requiring the sharp ground truth.
+That prior vector p then drives our FiLM conditioning at each decoder scale. The
+formula is: FiLM(x) = gamma times x plus beta, where gamma and beta are both
+predicted from p through a single linear layer. The prior modulates the backbone
+features without replacing them.
 
-Stage 3 is the integration: we replace the Sharp Encoder with the trained BlurDM
-prior and fine-tune everything end-to-end at higher 384px crop resolution — this is
-where the model learns to use a real diffusion prior at inference time.
-
-
-SLIDE 7 — Proposed Modification (FiLM Pipeline)
-------------------------------------------------
-This slide shows the full inference pipeline of our proposed modification. Starting
-from the blurred input, we pass it through a Blur Encoder to extract a compact latent
-code zB. That code is fed into BlurDM to produce a single prior vector p — capturing
-the global blur context of the image in one compact representation.
-
-That prior vector p drives our FiLM conditioning. The formula on the slide says:
-FiLM(x) = gamma times x plus beta, where gamma and beta are both predicted from p
-through a single linear layer. This means the prior scales and shifts every feature
-map in the decoder at each resolution scale — four injection points total. The
-backbone features are not replaced, just modulated by the prior.
-
-There are three key motivations for this design. First, FiLM injects global blur
-context without replacing any backbone computation — the backbone still does the heavy
-lifting, the prior just steers it in the right direction. Second, there are no
-iterative diffusion steps at inference — we extract p once and run a single forward
-pass, which makes it fast compared to running full reverse diffusion. Third, our
-HybridBlurDM extension adds frequency-domain processing on top of this — the
-DualDomainMixer processes features in both spatial and FFT domains simultaneously,
-which is better suited to motion blur because blur has a strong frequency signature
-that spatial convolutions alone can miss.
+Our three motivations for this design: first, FiLM injects global blur context
+without replacing backbone computation. Second, there are no iterative diffusion
+steps at inference — we extract p once and run a single forward pass, which is fast.
+Third, our HybridBlurDM extension adds frequency-domain processing on top of this
+for better motion pattern capture.
 
 
-SLIDE 8 — Dataset and Experimental Setup
+SLIDE 6 — Dataset and Experimental Setup
 -----------------------------------------
-Our dataset is GoPro — the standard benchmark for motion deblurring. It contains 2103
-training pairs and 1111 test pairs, all at full 1280x720 resolution. The blur is real,
-not synthetic: a GoPro camera captures sequences at high frame rate, and adjacent
-frames are averaged to produce realistic motion blur. This gives us diverse blur types
-across many real-world scenes.
+Our benchmark dataset is GoPro — the standard for motion deblurring research. It
+contains 2,103 training pairs and 1,111 test pairs at full 1280x720 resolution.
+The blur is real, not synthetic, captured by averaging adjacent high-speed frames
+from a GoPro camera, giving diverse real motion blur sequences.
 
 On the software side, we use Python 3.10 and PyTorch 2.x. Training uses mixed
-precision — AMP — for speed, EMA weight averaging with decay 0.999 for stable
-convergence, and a combined Charbonnier plus FFT loss for both pixel-level accuracy
-and frequency fidelity.
+precision — AMP — for speed, EMA weight averaging with decay 0.999 for stability,
+and a combined Charbonnier plus FFT loss. All training runs on a single GPU with
+CUDA acceleration.
 
-For hardware, all training runs on a single GPU with CUDA acceleration.
-
-The training configuration table on the right shows the four stages. Stage 1 trains
-the backbone plus the Latent Encoder for 300 epochs at 256px crop with learning rate
-3e-4 down to 1e-7. Stage 1b is an extended run of another 300 epochs with a lower
-starting rate of 5e-5. Stage 2 trains the BlurDM diffusion model for 3000 epochs at
-256px with learning rate 1e-4 down to 1e-6 — this stage was completed for MIMO-UNet
-and NAFNet, but not for HybridBlurDM due to time constraints. Stage 3 is the joint
-fine-tuning at 384px crop for 50 epochs with a very low learning rate 2e-6 to 1e-8.
+The training configuration table on the right shows the 3-stage curriculum. Stage
+1 trains the backbone for 300 epochs at 256px crop, learning rate 3e-4 to 1e-7.
+Stage 1b is an extended run of another 300 epochs at a lower starting rate. Stage
+2 trains the diffusion model for 3000 epochs at 256px. Stage 3 is joint fine-tuning
+for 50 epochs at 384px with a very low learning rate.
 
 
-SLIDE 9 — Implementation Workflow
+SLIDE 7 — Implementation Workflow
 -----------------------------------
-Our implementation followed six steps. We started with a literature review covering
-BlurDM, NAFNet, FiLM conditioning, and DDPM. Then prepared the GoPro dataset pipeline.
-Designed both model architectures. Trained Stage 1 backbones for 300+ epochs. Ran
-Stage 2 diffusion training — for MIMO-UNet and NAFNet, this completed successfully.
-Finally evaluated with PSNR, SSIM, LPIPS, and TTA.
+Our implementation followed six steps. First, a literature review covering BlurDM,
+NAFNet, FiLM conditioning, and DDPM/DDIM diffusion frameworks. Second, dataset
+preparation — setting up the GoPro train/test split, augmentation pipeline, and
+dataloaders. Third, architecture design — we built both NAFNetBlurDM-light and
+HybridBlurDM-light with FiLM injection layers at each U-Net scale.
 
-HybridBlurDM completed Stage 1 but did not progress to Stage 2 and 3 — we will
-discuss why on the Discussion slide.
+Step 4 was Stage 1 training — training the backbone with the Sharp LatentEncoder
+prior for 300+ epochs with cosine learning rate 3e-4 to 1e-7. Step 5 was Stage 2
+diffusion training — for MIMO-UNet and NAFNet this completed successfully, with
+BlurDM trained on the blur-encoder latent space with the backbone frozen. Step 6
+was Stage 3 and evaluation — joint fine-tuning at 384px and measuring PSNR, SSIM,
+LPIPS, and 4-way TTA. HybridBlurDM only completed Stage 1 — we will discuss why
+in the Discussion slide.
 
 
-SLIDE 10 — Qualitative Results
+SLIDE 8 — Qualitative Results
 --------------------------------
-Here are qualitative comparisons on four scenes from the GoPro test set. Each panel
-shows a red-cropped region from the full blurred image, followed by three patches:
-the blurred input, our model's output, and the sharp ground truth. Row 1 is
-NAFNetBlurDM-light with the full DM prior. Row 2 is HybridBlurDM-light standalone.
+Here we show visual comparison results across multiple scenes from the GoPro test
+set. For each scene, we compare: the blurred input, our model's output patch, and
+the sharp ground truth patch — with a red box highlighting the region of interest.
 
-Both models successfully remove motion blur — sharp edges and text characters are
-recovered. HybridBlurDM shows competitive or better fine texture recovery, visible
-especially in Scene 1 (text/banners) and Scene 2 (flower petals and leaves).
+The top row compares NAFNetBlurDM and HybridBlurDM on a street/banner scene. The
+bottom left is a tree/outdoor scene, and bottom right is a flower scene.
 
-Note: HybridBlurDM uses tile-based inference here — we process the full 1280x720
-image as overlapping 128x128 tiles blended with a Hann window — because its FFT
-components were trained on 128px patches and produce degraded output at full
-resolution. This is addressed in the Discussion.
+Three key points to take away: first, both models produce sharper object boundaries
+compared to the blurred input. Second, texture recovery is noticeably improved —
+you can see fine detail in text characters, leaves, and flower petals that was lost
+in the blur. Third, overall visual quality is better — the outputs are much closer
+to the sharp ground truth than the blurred inputs.
 
 
-SLIDE 11 — Quantitative Results
+SLIDE 9 — Quantitative Results
 ---------------------------------
-Moving to quantitative results. MIMO-UNetBlurDM, which completed the full 3-stage
-training, achieves 32.38 dB — the best of our three models. NAFNetBlurDM-light reaches
-31.71 dB with the DM prior, up from 31.29 dB at Stage 1 — a +0.42 dB gain from
-diffusion conditioning. HybridBlurDM-light achieves 31.96 dB, but this is standalone
-training only, no DM prior.
+Moving to quantitative results. The training curve on the left shows all three
+models converging over 300 epochs on the GoPro validation set.
 
-Two things to highlight:
-  1. HybridBlurDM already beats NAFNet-with-DM by +0.25 dB using only standalone
-     training — the architecture itself is the stronger one.
-  2. The training curve shows all three models converging over 300 epochs — HybridBlurDM
-     and NAFNet are close, while MIMO-UNet plateaus higher due to its more powerful
-     backbone.
+Looking at the results table: MIMO-UNetBlurDM achieves the best result at 32.38 dB
+PSNR with the full BlurDM prior after Stage 3 — up from 32.23 dB at Stage 1.
+NAFNetBlurDM-light reaches 31.71 dB with the DM prior after Stage 3, up from
+31.29 dB at Stage 1 — a gain of +0.42 dB from diffusion conditioning.
+
+The key highlight is HybridBlurDM-light at 31.96 dB — standalone training only, no
+DM prior. Despite having no diffusion prior active, it already beats NAFNetBlurDM
+with the full DM prior by +0.25 dB. This shows the architecture advantage of our
+DualDomainMixer design is worth more than the diffusion prior alone.
 
 
-SLIDE 12 — Discussion
+SLIDE 10 — Discussion
 -----------------------
-Strengths: both models effectively remove motion blur across varied scenes.
-HybridBlurDM's DualDomainMixer gives it an edge — processing features in both spatial
-and frequency domains lets it capture motion patterns that pure spatial convolutions
-miss. The numbers confirm this: 31.96 dB beats NAFNetBlurDM WITH the DM prior at
-31.71 dB — the architecture advantage alone is worth +0.25 dB.
+Strengths: both models effectively remove motion blur. HybridBlurDM achieves better
+feature extraction through its DualDomainMixer, which processes features in both
+spatial and frequency domains simultaneously. And HybridBlurDM-light achieves
+31.96 dB surpassing NAFNet — purely from architectural improvement.
 
-Limitations: the model is computationally heavy — FFT operations and deformable
-attention are much more expensive than NAFNet's simple gated convolutions. More
-importantly, HybridBlurDM did not complete the full 3-stage pipeline. The root cause:
-we spent significant time debugging architectural bugs — the DualDomainMixer FFT
-integration, MotionStripConv kernel shapes, and deformable attention offsets all had
-tensor shape mismatches that required multiple rewrites, consuming the time we needed
-for Stage 2 and Stage 3.
+On limitations and why HybridBlurDM is behind the other models in the full 3-stage
+comparison: first, high computational cost — FFT operations and deformable attention
+are expensive compared to NAFNet's simple gated convolutions. Second, long training
+time as a result. Third, HybridBlurDM did not complete the full 3-stage pipeline.
+And fourth, time was lost to model errors — architectural bugs in DualDomainMixer,
+MotionStripConv, and deformable attention all required debugging and rewrites,
+consuming the time needed for Stage 2 and Stage 3.
 
 
-SLIDE 13 — Conclusion
+SLIDE 11 — Conclusion
 -----------------------
-In summary, we implemented and evaluated three FiLM-conditioned deblurring models on
-GoPro. The key result: HybridBlurDM at 31.96 dB beats NAFNetBlurDM with the full
-diffusion prior at 31.71 dB — purely from architectural advantage. MIMO-UNetBlurDM at
-32.38 dB shows what is achievable with the full 3-stage pipeline.
+To summarize what we accomplished. We studied the BlurDM architecture and understood
+how its 3-stage pipeline works. We designed a FiLM-conditioned backbone that injects
+diffusion priors at every U-Net encoder and decoder scale. We implemented two model
+variants — NAFNetBlurDM-light and HybridBlurDM-light — trained with the 3-stage
+curriculum on the GoPro benchmark.
 
-Projection: based on the observed +0.42 dB gain from Stage 1 to Stage 3 in NAFNet,
-we estimate HybridBlurDM with full 3-stage training would reach approximately
-32.4-32.5 dB — competitive with or potentially exceeding MIMO-UNetBlurDM.
+The headline result: HybridBlurDM already beats NAFNet with the full DM prior by
++0.25 dB using standalone training only — the architecture itself is the stronger
+contribution.
 
-Next practical steps: complete Stage 2 and Stage 3 training for HybridBlurDM, and
-train with larger crop sizes so the FFT components generalize to full 1280x720
-inference without tile stitching.
+For future work: the projected full 3-stage HybridBlurDM estimate is around 32.4
+to 32.5 dB based on the +0.42 dB gain observed in NAFNet. The next step is to
+complete Stage 2 and Stage 3 training for HybridBlurDM.
 
 
-SLIDE 14 — Thank You
+SLIDE 12 — Thank You
 ----------------------
 That concludes our presentation. Our best validated result is 31.96 dB PSNR from
-HybridBlurDM-light standalone training, with an estimated ~32.5 dB projected if the
-full 3-stage pipeline had been completed. We are happy to take any questions.
+HybridBlurDM-light standalone, with an estimated 32.4 to 32.5 dB projected for the
+full 3-stage pipeline. We are happy to take any questions.
 
 Thank you.

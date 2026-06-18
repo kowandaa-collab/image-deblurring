@@ -97,18 +97,28 @@ which is better suited to motion blur because blur has a strong frequency signat
 that spatial convolutions alone can miss.
 
 
-SLIDE 8 — Dataset & Experimental Setup
----------------------------------------
-We train on the GoPro dataset — 2103 training pairs and 1111 test pairs at 1280x720
-resolution, with real motion blur captured by a GoPro camera at high frame rate and
-averaged down. Training uses mixed precision AMP for speed, EMA weight averaging with
-0.999 decay for stability, and a combined loss: Charbonnier for pixel accuracy plus an
-FFT loss for frequency fidelity.
+SLIDE 8 — Dataset and Experimental Setup
+-----------------------------------------
+Our dataset is GoPro — the standard benchmark for motion deblurring. It contains 2103
+training pairs and 1111 test pairs, all at full 1280x720 resolution. The blur is real,
+not synthetic: a GoPro camera captures sequences at high frame rate, and adjacent
+frames are averaged to produce realistic motion blur. This gives us diverse blur types
+across many real-world scenes.
 
-One important trick: 4-way Test-Time Augmentation. At inference we run the model on
-the original image, horizontal flip, vertical flip, and both flips combined — then
-average the four predictions. This gives a free +0.2 to 0.3 dB PSNR improvement at
-zero training cost.
+On the software side, we use Python 3.10 and PyTorch 2.x. Training uses mixed
+precision — AMP — for speed, EMA weight averaging with decay 0.999 for stable
+convergence, and a combined Charbonnier plus FFT loss for both pixel-level accuracy
+and frequency fidelity.
+
+For hardware, all training runs on a single GPU with CUDA acceleration.
+
+The training configuration table on the right shows the four stages. Stage 1 trains
+the backbone plus the Latent Encoder for 300 epochs at 256px crop with learning rate
+3e-4 down to 1e-7. Stage 1b is an extended run of another 300 epochs with a lower
+starting rate of 5e-5. Stage 2 trains the BlurDM diffusion model for 3000 epochs at
+256px with learning rate 1e-4 down to 1e-6 — this stage was completed for MIMO-UNet
+and NAFNet, but not for HybridBlurDM due to time constraints. Stage 3 is the joint
+fine-tuning at 384px crop for 50 epochs with a very low learning rate 2e-6 to 1e-8.
 
 
 SLIDE 9 — Implementation Workflow

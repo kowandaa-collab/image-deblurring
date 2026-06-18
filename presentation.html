@@ -72,6 +72,20 @@
 
   /* Chart container */
   .chart-wrap { background: #0d1117; border: 1px solid #1e3a3a; border-radius: 10px; padding: 16px; margin-top: 12px; }
+
+  /* Code screenshot */
+  .code-snap { background: #1e1e1e; border-radius: 8px; overflow: hidden; margin-top: 10px; border: 1px solid #2d2d2d; }
+  .cs-bar { background: #2d2d2d; padding: 5px 12px; display: flex; align-items: center; gap: 5px; }
+  .cs-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .cs-fname { font-size: 0.68rem; color: #6b7280; margin-left: 6px; font-family: 'Courier New', monospace; }
+  .code-snap pre { padding: 9px 14px; margin: 0; font-family: 'Courier New', monospace; font-size: 0.72rem; line-height: 1.55; color: #d4d4d4; white-space: pre; }
+  .cs-kw  { color: #569cd6; }
+  .cs-fn  { color: #dcdcaa; }
+  .cs-cm  { color: #6a9955; }
+  .cs-st  { color: #ce9178; }
+  .cs-num { color: #b5cea8; }
+  .cs-cls { color: #4ec9b0; }
+  .cs-self{ color: #9cdcfe; }
 </style>
 </head>
 <body>
@@ -379,6 +393,19 @@
     <text x="610" y="30" fill="#4b5563" font-size="8" font-family="sans-serif">— FiLM(x) = γ·x + β</text>
     <text x="610" y="44" fill="#4b5563" font-size="8" font-family="sans-serif">— [γ,β] = Linear(p)</text>
   </svg>
+  <div class="code-snap" style="max-width:580px;">
+    <div class="cs-bar">
+      <div class="cs-dot" style="background:#ff5f57;"></div>
+      <div class="cs-dot" style="background:#febc2e;"></div>
+      <div class="cs-dot" style="background:#28c840;"></div>
+      <span class="cs-fname">HybridBlurDM.py — DualDomainMixer.forward()</span>
+    </div>
+    <pre><span class="cs-kw">def</span> <span class="cs-fn">forward</span>(<span class="cs-self">self</span>, x: Tensor) -> Tensor:
+    y = <span class="cs-self">self</span>.norm(x)
+    f = <span class="cs-self">self</span>.freq(y)          <span class="cs-cm"># FFT global branch — captures motion blur frequency signature</span>
+    s = <span class="cs-self">self</span>.spatial(y)       <span class="cs-cm"># Depthwise spatial branch — preserves local structure</span>
+    <span class="cs-kw">return</span> <span class="cs-self">self</span>.gate(torch.cat([f, s], dim=<span class="cs-num">1</span>))  <span class="cs-cm"># Learned channel-wise gate fuses both</span></pre>
+  </div>
   <div class="slide-num">6 / 14</div>
 </div>
 
@@ -393,6 +420,24 @@
         FiLM(x) = γ · x + β<br>
         [γ, β] = Linear(p)<br>
         <span style="color:#4b5563;font-size:0.8rem;">init: γ=1, β=0 (identity)</span>
+      </div>
+      <div class="code-snap">
+        <div class="cs-bar">
+          <div class="cs-dot" style="background:#ff5f57;"></div>
+          <div class="cs-dot" style="background:#febc2e;"></div>
+          <div class="cs-dot" style="background:#28c840;"></div>
+          <span class="cs-fname">HybridBlurDM.py — FiLMInjection</span>
+        </div>
+        <pre><span class="cs-kw">class</span> <span class="cs-cls">FiLMInjection</span>(nn.Module):
+    <span class="cs-kw">def</span> <span class="cs-fn">__init__</span>(<span class="cs-self">self</span>, channels, prior_dim):
+        <span class="cs-self">self</span>.film = nn.Linear(prior_dim, channels * <span class="cs-num">2</span>)
+        nn.init.ones_(<span class="cs-self">self</span>.film.bias[:channels])   <span class="cs-cm"># γ=1</span>
+        nn.init.zeros_(<span class="cs-self">self</span>.film.bias[channels:])  <span class="cs-cm"># β=0</span>
+
+    <span class="cs-kw">def</span> <span class="cs-fn">forward</span>(<span class="cs-self">self</span>, x, prior):
+        film = <span class="cs-self">self</span>.film(prior).unsqueeze(<span class="cs-num">-1</span>).unsqueeze(<span class="cs-num">-1</span>)
+        scale, shift = film.chunk(<span class="cs-num">2</span>, dim=<span class="cs-num">1</span>)
+        <span class="cs-kw">return</span> x * scale + shift  <span class="cs-cm"># FiLM(x) = γ·x + β</span></pre>
       </div>
       <div class="label">Two Model Variants</div>
       <table style="margin-top:8px;">
@@ -519,6 +564,21 @@
         <div style="background:#0d1117;border:1px solid #1e3a3a;border-radius:6px;padding:7px 12px;font-size:0.78rem;color:#c0c8d0;">HV-Flip</div>
       </div>
       <div style="margin-top:8px;font-size:0.78rem;color:#6b7280;">Average predictions → +0.2–0.3 dB PSNR at zero training cost</div>
+      <div class="code-snap" style="margin-top:12px;">
+        <div class="cs-bar">
+          <div class="cs-dot" style="background:#ff5f57;"></div>
+          <div class="cs-dot" style="background:#febc2e;"></div>
+          <div class="cs-dot" style="background:#28c840;"></div>
+          <span class="cs-fname">train_stage1.py — fft_loss()</span>
+        </div>
+        <pre><span class="cs-kw">def</span> <span class="cs-fn">fft_loss</span>(criterion, pred, target):
+    pf = torch.fft.rfft2(pred,   norm=<span class="cs-st">"backward"</span>)
+    tf = torch.fft.rfft2(target, norm=<span class="cs-st">"backward"</span>)
+    <span class="cs-kw">return</span> criterion(
+        torch.stack([pf.real, pf.imag], dim=<span class="cs-num">-1</span>),
+        torch.stack([tf.real, tf.imag], dim=<span class="cs-num">-1</span>),
+    )</pre>
+      </div>
     </div>
   </div>
   <div class="slide-num">8 / 14</div>

@@ -47,8 +47,8 @@
   .placeholder { width: 100%; background: #0d1117; border: 1px dashed #2a3a3a; border-radius: 10px; padding: 36px; text-align: center; color: #4b5563; font-size: 0.92rem; }
   #s1 { align-items: center; justify-content: center; text-align: center; }
   #s1 .slide-title { font-size: 3.6rem; text-align: center; margin-bottom: 18px; }
-  #s14 { align-items: center; justify-content: center; text-align: center; }
-  #s14 .big { font-size: 4.2rem; font-weight: 900; color: #fff; text-shadow: 0 0 80px rgba(13,148,136,0.5); }
+  #s12 { align-items: center; justify-content: center; text-align: center; }
+  #s12 .big { font-size: 4.2rem; font-weight: 900; color: #fff; text-shadow: 0 0 80px rgba(13,148,136,0.5); }
 
   /* ── Icon cards ── */
   .icon-card { background: #0d1117; border-radius: 10px; padding: 12px 16px; margin-bottom: 10px; display: flex; align-items: flex-start; gap: 12px; }
@@ -129,78 +129,12 @@
     <div class="pill">Charlie &nbsp; 1123532</div>
     <div class="pill">Alvin &nbsp; 1123530</div>
   </div>
-  <div class="slide-num">1 / 14</div>
+  <div class="slide-num">1 / 12</div>
 </div>
 
-<!-- ===== SLIDE 2: INTRODUCTION ===== -->
+
+<!-- ===== SLIDE 2: PROBLEM STATEMENT ===== -->
 <div class="slide" id="s2">
-  <div class="logo"><div class="logo-icon">C</div>BLURDM</div>
-  <div class="section-title">Introduction</div>
-  <div class="cols">
-    <div class="col">
-      <div class="label">Background</div>
-      <p style="font-size:0.9rem;color:#c0c8d0;line-height:1.6;">Image deblurring restores blurry images to sharp, clear images — a fundamental low-level vision task with broad real-world impact.</p>
-      <div class="label">Causes of Blur</div>
-      <ul>
-        <li>Camera shake during long exposure</li>
-        <li>Fast-moving objects (motion blur)</li>
-        <li>Low-light environments requiring slow shutter</li>
-      </ul>
-      <div class="label">Applications</div>
-      <ul>
-        <li>Photography &amp; Surveillance</li>
-        <li>Medical Imaging</li>
-        <li>Autonomous Driving</li>
-      </ul>
-    </div>
-    <div class="col" style="display:flex;align-items:center;justify-content:center;">
-      <svg width="300" height="260" viewBox="0 0 300 260">
-        <rect x="5" y="5" width="88" height="100" rx="6" fill="#0d1117" stroke="#1e3a3a"/>
-        <text x="49" y="22" text-anchor="middle" fill="#0d9488" font-size="8" font-family="sans-serif" font-weight="700">CAMERA SHAKE</text>
-        <rect x="28" y="34" width="42" height="30" rx="4" fill="#1e3a3a"/>
-        <circle cx="49" cy="49" r="9" fill="#0a0e12" stroke="#5eead4" stroke-width="1.5"/>
-        <circle cx="49" cy="49" r="4" fill="#5eead4" opacity="0.5"/>
-        <path d="M15,75 Q25,68 35,76 Q45,84 55,76 Q65,68 75,76 Q85,84 95,76" stroke="#fb923c" stroke-width="1.5" fill="none" opacity="0.8"/>
-        <path d="M15,82 Q25,75 35,83 Q45,91 55,83 Q65,75 75,83 Q85,91 95,83" stroke="#fb923c" stroke-width="1" fill="none" opacity="0.5"/>
-        <text x="49" y="100" text-anchor="middle" fill="#4b5563" font-size="7.5" font-family="sans-serif">Vibration during exposure</text>
-        <rect x="106" y="5" width="88" height="100" rx="6" fill="#0d1117" stroke="#1e3a3a"/>
-        <text x="150" y="22" text-anchor="middle" fill="#0d9488" font-size="8" font-family="sans-serif" font-weight="700">OBJECT MOTION</text>
-        <rect x="125" y="50" width="50" height="20" rx="4" fill="#1e3a3a"/>
-        <circle cx="133" cy="72" r="5" fill="#4b5563"/>
-        <circle cx="167" cy="72" r="5" fill="#4b5563"/>
-        <line x1="115" y1="55" x2="125" y2="55" stroke="#7dd3fc" stroke-width="2" opacity="0.6"/>
-        <line x1="112" y1="60" x2="125" y2="60" stroke="#7dd3fc" stroke-width="2" opacity="0.4"/>
-        <line x1="109" y1="65" x2="125" y2="65" stroke="#7dd3fc" stroke-width="2" opacity="0.6"/>
-        <text x="150" y="100" text-anchor="middle" fill="#4b5563" font-size="7.5" font-family="sans-serif">High-speed scene elements</text>
-        <rect x="207" y="5" width="88" height="100" rx="6" fill="#060a0e" stroke="#1e3a3a"/>
-        <text x="251" y="22" text-anchor="middle" fill="#0d9488" font-size="8" font-family="sans-serif" font-weight="700">LOW LIGHT</text>
-        <circle cx="230" cy="45" r="1.5" fill="#5eead4" opacity="0.9"/>
-        <circle cx="245" cy="38" r="1" fill="#7dd3fc" opacity="0.7"/>
-        <circle cx="260" cy="52" r="1.5" fill="#5eead4" opacity="0.8"/>
-        <circle cx="272" cy="42" r="1" fill="#a78bfa" opacity="0.6"/>
-        <circle cx="238" cy="60" r="1" fill="#7dd3fc" opacity="0.5"/>
-        <circle cx="255" cy="68" r="1.5" fill="#5eead4" opacity="0.7"/>
-        <circle cx="268" cy="58" r="1" fill="#fb923c" opacity="0.4"/>
-        <circle cx="222" cy="70" r="1" fill="#7dd3fc" opacity="0.6"/>
-        <circle cx="248" cy="78" r="1.5" fill="#5eead4" opacity="0.5"/>
-        <path d="M255,35 A14,14 0 1,1 255,65 A10,10 0 1,0 255,35" fill="#fbbf24" opacity="0.2"/>
-        <text x="251" y="100" text-anchor="middle" fill="#4b5563" font-size="7.5" font-family="sans-serif">Long exposure → noise + blur</text>
-        <text x="150" y="130" text-anchor="middle" fill="#4b5563" font-size="9" font-family="sans-serif">All causes result in:</text>
-        <rect x="60" y="140" width="180" height="50" rx="6" fill="#0d1117" stroke="#1e3a3a"/>
-        <circle cx="120" cy="165" r="15" fill="none" stroke="#5eead4" stroke-width="4" opacity="0.15"/>
-        <circle cx="120" cy="165" r="10" fill="none" stroke="#5eead4" stroke-width="3" opacity="0.2"/>
-        <circle cx="120" cy="165" r="5" fill="#5eead4" opacity="0.15"/>
-        <circle cx="180" cy="165" r="12" fill="none" stroke="#7dd3fc" stroke-width="3" opacity="0.15"/>
-        <circle cx="180" cy="165" r="6" fill="#7dd3fc" opacity="0.12"/>
-        <text x="150" y="202" text-anchor="middle" fill="#5eead4" font-size="9" font-family="sans-serif" font-weight="700">Loss of detail, sharp edges, texture</text>
-      </svg>
-    </div>
-  </div>
-  <div class="slide-num">2 / 14</div>
-</div>
-
-<!-- ===== SLIDE 3: PROBLEM STATEMENT ===== -->
-<div class="slide" id="s3">
   <div class="logo"><div class="logo-icon">C</div>BLURDM</div>
   <div class="section-title">Problem Statement</div>
   <div class="cols">
@@ -246,11 +180,11 @@
       </svg>
     </div>
   </div>
-  <div class="slide-num">3 / 14</div>
+  <div class="slide-num">2 / 12</div>
 </div>
 
-<!-- ===== SLIDE 4: OBJECTIVES ===== -->
-<div class="slide" id="s4">
+<!-- ===== SLIDE 3: OBJECTIVES ===== -->
+<div class="slide" id="s2">
   <div class="logo"><div class="logo-icon">C</div>BLURDM</div>
   <div class="section-title">Project Objectives</div>
   <div style="margin-top:6px;">
@@ -275,73 +209,12 @@
       <div class="obj-text">Evaluate restoration performance using <strong>PSNR, SSIM, and LPIPS</strong> on the GoPro benchmark with 4-way Test-Time Augmentation.</div>
     </div>
   </div>
-  <div class="slide-num">4 / 14</div>
+  <div class="slide-num">3 / 12</div>
 </div>
 
-<!-- ===== SLIDE 5: BLURDM OVERVIEW ===== -->
-<div class="slide" id="s5">
-  <div class="logo"><div class="logo-icon">C</div>BLURDM</div>
-  <div class="section-title">BlurDM Overview</div>
-  <div class="cols">
-    <div class="col">
-      <p style="font-size:0.88rem;color:#c0c8d0;line-height:1.6;margin-bottom:12px;">Unlike standard diffusion that only adds Gaussian noise, BlurDM simultaneously introduces <strong style="color:#5eead4;">blur + noise</strong> during the forward process — modeling the physical degradation directly.</p>
-      <div class="label">Key Properties</div>
-      <ul>
-        <li>Dual forward process: blur residual + noise residual</li>
-        <li>Separates noise and blur in latent space</li>
-        <li>Reverse process reconstructs sharp image step-by-step</li>
-        <li>Uses Blur Encoder to extract degradation latent z<sub>B</sub></li>
-      </ul>
-      <div style="margin-top:16px;background:#0d1117;border:1px solid #1e3a3a;border-radius:8px;padding:14px 18px;">
-        <div style="font-size:0.72rem;color:#6b7280;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.06em;">Forward Diffusion</div>
-        <div style="font-family:'Courier New',monospace;font-size:0.85rem;color:#7dd3fc;">
-          I<sub>t</sub> = (α<sub>t-1</sub>/α<sub>t</sub>)·I<sub>t-1</sub> + (1/α<sub>t</sub>)·e<sub>t</sub> + β<sub>t</sub>ε<sub>t</sub>
-        </div>
-        <div style="font-size:0.72rem;color:#4b5563;margin-top:6px;">blur term + noise term at each step</div>
-      </div>
-    </div>
-    <div class="col">
-      <div style="font-size:0.78rem;color:#6b7280;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em;">Diffusion Process Timeline</div>
-      <svg width="100%" viewBox="0 0 380 190" style="max-width:400px;">
-        <defs>
-          <filter id="b0"><feGaussianBlur stdDeviation="0"/></filter>
-          <filter id="b2"><feGaussianBlur stdDeviation="2.5"/></filter>
-          <filter id="b5"><feGaussianBlur stdDeviation="5"/></filter>
-          <filter id="b8"><feGaussianBlur stdDeviation="8"/></filter>
-          <filter id="b12"><feGaussianBlur stdDeviation="12"/></filter>
-        </defs>
-        <line x1="30" y1="95" x2="350" y2="95" stroke="#1e3a3a" stroke-width="1.5"/>
-        <circle cx="55" cy="95" r="28" fill="#0d9488" filter="url(#b0)" opacity="0.9"/>
-        <circle cx="55" cy="95" r="14" fill="#5eead4" filter="url(#b0)" opacity="0.8"/>
-        <text x="55" y="135" text-anchor="middle" fill="#5eead4" font-size="9" font-family="sans-serif" font-weight="700">T=0</text>
-        <text x="55" y="148" text-anchor="middle" fill="#4b5563" font-size="7.5" font-family="sans-serif">Sharp</text>
-        <circle cx="135" cy="95" r="30" fill="#0d9488" filter="url(#b2)" opacity="0.7"/>
-        <circle cx="135" cy="95" r="14" fill="#5eead4" filter="url(#b2)" opacity="0.6"/>
-        <text x="135" y="135" text-anchor="middle" fill="#6b7280" font-size="9" font-family="sans-serif">T=1</text>
-        <circle cx="210" cy="95" r="32" fill="#0d9488" filter="url(#b5)" opacity="0.5"/>
-        <circle cx="210" cy="95" r="14" fill="#5eead4" filter="url(#b5)" opacity="0.4"/>
-        <text x="210" y="135" text-anchor="middle" fill="#6b7280" font-size="9" font-family="sans-serif">T=2</text>
-        <circle cx="280" cy="95" r="34" fill="#0d9488" filter="url(#b8)" opacity="0.35"/>
-        <circle cx="280" cy="95" r="14" fill="#5eead4" filter="url(#b8)" opacity="0.3"/>
-        <text x="280" y="135" text-anchor="middle" fill="#6b7280" font-size="9" font-family="sans-serif">T=3</text>
-        <circle cx="348" cy="95" r="36" fill="#374151" filter="url(#b12)" opacity="0.6"/>
-        <circle cx="348" cy="95" r="18" fill="#6b7280" filter="url(#b12)" opacity="0.4"/>
-        <text x="348" y="135" text-anchor="middle" fill="#fb923c" font-size="9" font-family="sans-serif">T=T</text>
-        <text x="348" y="148" text-anchor="middle" fill="#4b5563" font-size="7.5" font-family="sans-serif">Noisy+Blurry</text>
-        <text x="200" y="22" text-anchor="middle" fill="#fb923c" font-size="9" font-family="sans-serif" font-weight="700">→ Forward: add blur + noise →</text>
-        <text x="200" y="175" text-anchor="middle" fill="#0d9488" font-size="9" font-family="sans-serif" font-weight="700">← Reverse: BlurDM denoising + deblurring ←</text>
-        <circle cx="338" cy="85" r="1.5" fill="#fff" opacity="0.4"/>
-        <circle cx="355" cy="100" r="1" fill="#fff" opacity="0.3"/>
-        <circle cx="344" cy="108" r="1.5" fill="#fff" opacity="0.35"/>
-        <circle cx="362" cy="92" r="1" fill="#fff" opacity="0.25"/>
-      </svg>
-    </div>
-  </div>
-  <div class="slide-num">5 / 14</div>
-</div>
 
-<!-- ===== SLIDE 6: BLURDM ARCHITECTURE ===== -->
-<div class="slide" id="s6">
+<!-- ===== SLIDE 4: BLURDM ARCHITECTURE ===== -->
+<div class="slide" id="s2">
   <div class="logo"><div class="logo-icon">C</div>BLURDM</div>
   <div class="section-title">BlurDM Architecture</div>
   <div class="stages" style="margin-top:10px;">
@@ -406,11 +279,11 @@
     s = <span class="cs-self">self</span>.spatial(y)       <span class="cs-cm"># Depthwise spatial branch — preserves local structure</span>
     <span class="cs-kw">return</span> <span class="cs-self">self</span>.gate(torch.cat([f, s], dim=<span class="cs-num">1</span>))  <span class="cs-cm"># Learned channel-wise gate fuses both</span></pre>
   </div>
-  <div class="slide-num">6 / 14</div>
+  <div class="slide-num">4 / 12</div>
 </div>
 
-<!-- ===== SLIDE 7: PROPOSED METHOD ===== -->
-<div class="slide" id="s7">
+<!-- ===== SLIDE 5: PROPOSED METHOD ===== -->
+<div class="slide" id="s5">
   <div class="logo"><div class="logo-icon">C</div>BLURDM</div>
   <div class="section-title">Proposed Method — FiLM-Conditioned Backbone</div>
   <div class="cols">
@@ -518,11 +391,11 @@
       </svg>
     </div>
   </div>
-  <div class="slide-num">7 / 14</div>
+  <div class="slide-num">5 / 12</div>
 </div>
 
-<!-- ===== SLIDE 8: DATASET & SETUP ===== -->
-<div class="slide" id="s8">
+<!-- ===== SLIDE 6: DATASET & SETUP ===== -->
+<div class="slide" id="s2">
   <div class="logo"><div class="logo-icon">C</div>BLURDM</div>
   <div class="section-title">Dataset &amp; Experimental Setup</div>
   <div class="cols">
@@ -581,11 +454,11 @@
       </div>
     </div>
   </div>
-  <div class="slide-num">8 / 14</div>
+  <div class="slide-num">6 / 12</div>
 </div>
 
-<!-- ===== SLIDE 9: WORKFLOW ===== -->
-<div class="slide" id="s9">
+<!-- ===== SLIDE 7: WORKFLOW ===== -->
+<div class="slide" id="s5">
   <div class="logo"><div class="logo-icon">C</div>BLURDM</div>
   <div class="section-title">Implementation Workflow</div>
   <div class="wf-grid">
@@ -627,11 +500,11 @@
     <line x1="216" y1="22" x2="234" y2="22" stroke="#0d9488" stroke-width="1.5" marker-end="url(#wa)"/>
     <line x1="450" y1="22" x2="468" y2="22" stroke="#0d9488" stroke-width="1.5" marker-end="url(#wa)"/>
   </svg>
-  <div class="slide-num">9 / 14</div>
+  <div class="slide-num">7 / 12</div>
 </div>
 
-<!-- ===== SLIDE 10: QUALITATIVE ===== -->
-<div class="slide" id="s10">
+<!-- ===== SLIDE 8: QUALITATIVE ===== -->
+<div class="slide" id="s2">
   <div class="logo"><div class="logo-icon">C</div>BLURDM</div>
   <div class="section-title">Qualitative Results</div>
   <div style="font-size:0.75rem;color:#6b7280;margin-bottom:8px;">
@@ -656,11 +529,11 @@
       <img src="results/qualitative/qualitative_GOPR0868_11_00_000002.png" style="width:100%;border-radius:5px;border:1px solid #1e3a3a;" alt="Scene 4 qualitative">
     </div>
   </div>
-  <div class="slide-num">10 / 14</div>
+  <div class="slide-num">8 / 12</div>
 </div>
 
-<!-- ===== SLIDE 11: QUANTITATIVE ===== -->
-<div class="slide" id="s11">
+<!-- ===== SLIDE 9: QUANTITATIVE ===== -->
+<div class="slide" id="s5">
   <div class="logo"><div class="logo-icon">C</div>BLURDM</div>
   <div class="section-title">Quantitative Results — GoPro Benchmark</div>
   <div class="cols">
@@ -715,11 +588,11 @@
       </div>
     </div>
   </div>
-  <div class="slide-num">11 / 14</div>
+  <div class="slide-num">9 / 12</div>
 </div>
 
-<!-- ===== SLIDE 12: DISCUSSION ===== -->
-<div class="slide" id="s12">
+<!-- ===== SLIDE 10: DISCUSSION ===== -->
+<div class="slide" id="s2">
   <div class="logo"><div class="logo-icon">C</div>BLURDM</div>
   <div class="section-title">Discussion</div>
   <div class="cols">
@@ -741,11 +614,11 @@
       </ul>
     </div>
   </div>
-  <div class="slide-num">12 / 14</div>
+  <div class="slide-num">10 / 12</div>
 </div>
 
-<!-- ===== SLIDE 13: CONCLUSION ===== -->
-<div class="slide" id="s13">
+<!-- ===== SLIDE 11: CONCLUSION ===== -->
+<div class="slide" id="s5">
   <div class="logo"><div class="logo-icon">C</div>BLURDM</div>
   <div class="section-title">Conclusion</div>
   <div class="cols">
@@ -790,11 +663,11 @@
       </div>
     </div>
   </div>
-  <div class="slide-num">13 / 14</div>
+  <div class="slide-num">11 / 12</div>
 </div>
 
-<!-- ===== SLIDE 14: THANK YOU ===== -->
-<div class="slide" id="s14">
+<!-- ===== SLIDE 12: THANK YOU ===== -->
+<div class="slide" id="s2">
   <div class="logo"><div class="logo-icon">C</div>BLURDM</div>
   <svg style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);opacity:0.07;" width="500" height="500" viewBox="0 0 500 500">
     <circle cx="250" cy="250" r="200" fill="none" stroke="#0d9488" stroke-width="60"/>
@@ -808,7 +681,7 @@
     <div class="card" style="min-width:110px;"><div class="val" style="font-size:1.4rem;">3</div><div class="lbl">Model Variants</div></div>
     <div class="card" style="min-width:110px;"><div class="val" style="font-size:1.4rem;">~32.5</div><div class="lbl">Projected (3-stage)</div></div>
   </div>
-  <div class="slide-num">14 / 14</div>
+  <div class="slide-num">12 / 12</div>
 </div>
 
 </div><!-- #deck -->
